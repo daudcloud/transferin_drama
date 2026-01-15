@@ -63,7 +63,7 @@ var backBtn = menu.Data("🔙 Kembali", "back_to_start")
 var cancelBtn telebot.Btn
 var nextBtn telebot.Btn
 var prevBtn telebot.Btn
-var parentDir = `C:\Users\hp\melolo`
+var parentDir = `/home/melolo`
 
 type Package struct {
 	Days  int
@@ -1150,7 +1150,7 @@ func main() {
 			for i := 1; i <= totalPart; i++ {
 				partTitle := fmt.Sprintf("%s part %d", title, i)
 				partSlug := fmt.Sprintf("%s_part_%d", titleFolder, i)
-				videoURL := fmt.Sprintf("C://%s/%s.mp4", titleFolder, partSlug)
+				videoURL := fmt.Sprintf("%s/%s/%s.mp4", parentDir, titleFolder, partSlug)
 
 				video := models.Video{
 					Title:      partTitle,
