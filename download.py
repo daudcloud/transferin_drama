@@ -134,14 +134,17 @@ def download_drama(target_path, series_id, merge_limit):
     
     # 1. Setup Directory
     raw_title = drama_info.get("title", f"Drama_{series_id}")
-    series_title = "".join([c for c in raw_title if c.isalnum() or c in (' ', '_')]).strip()
+    series_title = re.sub(r'[() () ]', ' ', raw_title)
+    series_title = " ".join(series_title.split())
+    series_title = "".join([c for c in series_title if c.isalnum() or c in (' ', '_')]).strip()
+    slug_title = series_title.lower().replace(" ", "_")
     final_dir = Path(target_path) / series_title
     final_dir.mkdir(parents=True, exist_ok=True)
 
     # 2. Download Cover (Synchronous)
     cover_url = drama_info.get("cover")
     if cover_url:
-        download_file(cover_url, final_dir / f"cover_{series_title}.jpg", "Cover Image")
+        download_file(cover_url, final_dir / f"cover_{slug_title}.jpg", "Cover Image")
 
     print(f"Series: {series_title} | Total Episodes: {len(episodes)}")
     
@@ -174,7 +177,7 @@ def download_drama(target_path, series_id, merge_limit):
 if __name__ == "__main__":
     if len(sys.argv) >= 2:
         target_id = sys.argv[1]
-        folder = r"C:\Users\hp\melolo"
+        folder = "home/melolo"
         limit = 16
         download_drama(folder, target_id, limit)
     else:

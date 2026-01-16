@@ -63,7 +63,7 @@ var backBtn = menu.Data("🔙 Kembali", "back_to_start")
 var cancelBtn telebot.Btn
 var nextBtn telebot.Btn
 var prevBtn telebot.Btn
-var parentDir = `/home/melolo`
+var parentDir = `home/melolo`
 
 type Package struct {
 	Days  int
@@ -88,7 +88,7 @@ const (
 
 func GetJakartaTime() time.Time {
 	// RDP (US) time is currently 15 hours 11 minutes behind Jakarta
-	offset := 15*time.Hour + 11*time.Minute
+	offset := 0 * time.Hour
 	return time.Now().Add(offset)
 }
 
@@ -145,7 +145,7 @@ func generatePost(c telebot.Context, title string, totalParts int) error {
 	post.WriteString("☎️<a href=\"https://t.me/domi_nuc\">Admin</a>\n")
 
 	photo := &telebot.Photo{
-		File:    telebot.FromDisk(fmt.Sprintf(`%s\%s\%s`, parentDir, title, fmt.Sprintf("cover_%s.jpg", title))),
+		File:    telebot.FromDisk(fmt.Sprintf(`%s/%s/%s`, parentDir, title, fmt.Sprintf("cover_%s.jpg", title))),
 		Caption: post.String(),
 	}
 
@@ -1093,20 +1093,27 @@ func main() {
 			log.Fatal(err)
 		}
 
-		readRange := sheetName + "!A2:D"
+		readRange := sheetName + "!A2:E"
 		resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
 		if err != nil {
 			log.Fatal(err)
 		}
 
 		for i, row := range resp.Values {
-			if len(row) < 4 {
+			if len(row) < 5 {
 				continue
 			}
 
-			title := cleanTitle(fmt.Sprint(row[0]))
+			replacer := strings.NewReplacer(
+				"(", "",
+				")", "",
+			)
+			title := replacer.Replace(fmt.Sprint(row[0]))
+			title = cleanTitle(title)
 			seriesID := fmt.Sprint(row[1])
 			status := fmt.Sprint(row[3])
+			telegramSeriesID := fmt.Sprint(row[4])
+			telegramLink := fmt.Sprintf("https://t.me/DramaTrans/%s", telegramSeriesID)
 
 			if status != "Pending" {
 				continue
@@ -1115,7 +1122,7 @@ func main() {
 			fmt.Println("Processing ID:", seriesID)
 			titleFolder := strings.ToLower(strings.ReplaceAll(title, " ", "_")) // untuk folder + slug dasar
 			c.Send(fmt.Sprintf("Starting download for series ID: %s...", seriesID))
-			cmd := exec.Command("python", "download.py", seriesID)
+			cmd := exec.Command("python3", "download.py", seriesID)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			err := cmd.Run()
@@ -1124,7 +1131,7 @@ func main() {
 				return c.Send("Failed to download: ")
 			}
 			c.Send("Download complete")
-			baseDir := fmt.Sprintf(`%s\%s`, parentDir, title)
+			baseDir := fmt.Sprintf(`%s/%s`, parentDir, title)
 			// folderName := strings.Join(c.Args(), "")
 			targetDir := filepath.Join(baseDir)
 			log.Println(baseDir)
@@ -1153,13 +1160,14 @@ func main() {
 				videoURL := fmt.Sprintf("%s/%s/%s.mp4", parentDir, titleFolder, partSlug)
 
 				video := models.Video{
-					Title:      partTitle,
-					Slug:       partSlug,
-					VIPOnly:    i != 1, // part 1 gratis, lainnya VIP
-					VideoURL:   videoURL,
-					UploadTime: now,
-					Part:       i,
-					TotalPart:  totalPart,
+					Title:            partTitle,
+					Slug:             partSlug,
+					VIPOnly:          i != 1, // part 1 gratis, lainnya VIP
+					VideoURL:         videoURL,
+					UploadTime:       now,
+					Part:             i,
+					TotalPart:        totalPart,
+					TelegramSeriesID: telegramLink,
 				}
 
 				_, err := videoCol.InsertOne(ctx, video)
