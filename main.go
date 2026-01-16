@@ -41,14 +41,14 @@ var (
 	ctx = context.Background()
 )
 
-var trakteerLinks = map[string]int{
+var qrLink = map[string]int{
 	"vip_1d":  2000,
 	"vip_3d":  4000,
 	"vip_7d":  9000,
 	"vip_30d": 25000,
 }
 
-var trakteerDurations = map[string]int{
+var packageDuration = map[string]int{
 	"vip_1d":  1,
 	"vip_3d":  3,
 	"vip_7d":  7,
@@ -66,8 +66,8 @@ var prevBtn telebot.Btn
 var parentDir = `home/melolo`
 
 type Package struct {
-	Days  int
-	Price int
+	Days   int
+	Amount int
 }
 
 type APIResponse struct {
@@ -104,24 +104,24 @@ func getPackages(amount int) (map[int]int, int) {
 	totalDays := 0
 
 	for _, pkg := range packages {
-		count := amount / pkg.Price
+		count := amount / pkg.Amount
 		if count > 0 {
 			result[pkg.Days] = count
 			totalDays += count * pkg.Days
-			amount -= count * pkg.Price
+			amount -= count * pkg.Amount
 		}
 	}
 
 	return result, totalDays
 }
 
-func generatePost(c telebot.Context, title string, totalParts int) error {
+func generatePost(c telebot.Context, strTitle string, title string, totalParts int) error {
 	// Title is everything except last argument
 	slug := slugify(title)
 
 	var post strings.Builder
 	post.WriteString("⧐⧐DRAMATRANS⧏⧏\n")
-	post.WriteString(fmt.Sprintf("<b>⭐ JUDUL: %s ⭐</b>\n", strings.ToUpper(title)))
+	post.WriteString(fmt.Sprintf("<b>⭐ JUDUL: %s ⭐</b>\n", strings.ToUpper(strTitle)))
 	post.WriteString("━━━━━━━━━━━━━━━━━\n")
 
 	for i := 1; i < totalParts; i++ {
@@ -145,7 +145,7 @@ func generatePost(c telebot.Context, title string, totalParts int) error {
 	post.WriteString("☎️<a href=\"https://t.me/domi_nuc\">Admin</a>\n")
 
 	photo := &telebot.Photo{
-		File:    telebot.FromDisk(fmt.Sprintf(`%s/%s/%s`, parentDir, title, fmt.Sprintf("cover_%s.jpg", title))),
+		File:    telebot.FromDisk(fmt.Sprintf(`%s/%s/%s`, parentDir, title, fmt.Sprintf("cover_%s.jpg", slug))),
 		Caption: post.String(),
 	}
 
@@ -305,7 +305,7 @@ func generateTransactionID() string {
 	return txID
 }
 
-func sendTrakteerLink(c telebot.Context, vipCode string) error {
+func sendQris(c telebot.Context, vipCode string) error {
 
 	user := c.Sender()
 	userCollection := db.Collection("users")
@@ -318,7 +318,7 @@ func sendTrakteerLink(c telebot.Context, vipCode string) error {
 		return c.Send("Terjadi kesalahan saat memuat status akun kamu. Coba beberapa saat lagi.")
 	}
 
-	amount, ok := trakteerLinks[vipCode]
+	amount, ok := qrLink[vipCode]
 	if !ok {
 		return c.Send("❌ Paket VIP tidak ditemukan.")
 	}
@@ -366,7 +366,7 @@ func sendTrakteerLink(c telebot.Context, vipCode string) error {
 
 	fmt.Println("QR Code saved to:", filename)
 
-	duration, ok := trakteerDurations[vipCode]
+	duration, ok := packageDuration[vipCode]
 	if !ok {
 		duration = 1 // fallback default: 1 bulan
 	}
@@ -448,7 +448,7 @@ func sendTrakteerLink(c telebot.Context, vipCode string) error {
 }
 
 // Webhook handler di file utama bot
-func handleTrakteerWebhook(w http.ResponseWriter, r *http.Request) {
+func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	log.Print("Hitted")
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -460,22 +460,10 @@ func handleTrakteerWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
-	price, _ := payload["price"].(float64)
-	log.Print(price)
-	supporterMsg, _ := payload["supporter_message"].(string)
-	log.Printf("🔔 Received supporter message: %s", supporterMsg)
-
-	if !strings.Contains(supporterMsg, "#") {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	parts := strings.Split(supporterMsg, "#")
-	if len(parts) < 2 {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	code := strings.TrimSpace(parts[1])
+	amount, _ := payload["amount"].(float64)
+	log.Print(amount)
+	order_id, _ := payload["order_id"].(string)
+	log.Printf("🔔 Received Order ID: %s", order_id)
 
 	ctx := context.Background()
 	pendingCol := db.Collection("transactionPending")
@@ -483,9 +471,9 @@ func handleTrakteerWebhook(w http.ResponseWriter, r *http.Request) {
 	userCol := db.Collection("users")
 
 	var pendingTx models.TransactionPending
-	err := pendingCol.FindOne(ctx, bson.M{"code": code}).Decode(&pendingTx)
+	err := pendingCol.FindOne(ctx, bson.M{"transactionID": order_id}).Decode(&pendingTx)
 	if err != nil {
-		log.Printf("❌ Code not found in pending transactions: %s", code)
+		log.Printf("❌ Order ID not found in pending transactions: %s", order_id)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -498,7 +486,7 @@ func handleTrakteerWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, duration := getPackages(int(price))
+	_, duration := getPackages(int(amount))
 	if duration <= 0 {
 		duration = 0 // default fallback
 	}
@@ -639,7 +627,7 @@ func handleTrakteerWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Hapus dari pending
-	_, err = pendingCol.DeleteOne(ctx, bson.M{"code": code})
+	_, err = pendingCol.DeleteOne(ctx, bson.M{"trasactionID": order_id})
 	if err != nil {
 		log.Printf("⚠️ Failed to delete from pending: %v", err)
 	}
@@ -661,7 +649,7 @@ func handleTrakteerWebhook(w http.ResponseWriter, r *http.Request) {
 		log.Printf("⚠️ Failed to send message to user: %v", err)
 	}
 
-	log.Printf("✅ VIP activated for user ID %d with code %s (duration: %d hari)", pendingTx.TelegramID, code, duration)
+	log.Printf("✅ VIP activated for user ID %d with transaction ID %s (duration: %d hari)", pendingTx.TelegramID, order_id, duration)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -904,7 +892,7 @@ func cleanTitle(rawTitle string) string {
 
 	for _, r := range rawTitle {
 		// Check if alphanumeric or specific allowed characters
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' || r == '_' {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' || r == '_' || r == '(' || r == ')' {
 			builder.WriteRune(r)
 		}
 	}
@@ -946,7 +934,7 @@ func main() {
 			Timeout: 15 * time.Minute,
 		},
 		Poller: &telebot.LongPoller{Timeout: 10 * time.Second},
-		URL:    "http://localhost:8081",
+		// URL:    "http://localhost:8081",
 	}
 	bot, err = telebot.NewBot(pref)
 	if err != nil {
@@ -1019,7 +1007,9 @@ func main() {
 				"Klik tombol di bawah buat mulai 🎥\n\n"+
 				"🎁 <b>Program Referral VIP Gratis!</b>\n"+
 				"Undang temanmu untuk join DRAMATRANS pakai kode referral kamu (lihat di /status) dan dapatkan VIP GRATIS sesuai durasi VIP yang dibeli temanmu — hingga <b>maksimal 3 hari</b>! 💎\n"+
-				"Temanmu juga akan dapat <b>bonus durasi 100%%</b> dari paket VIP yang mereka beli (maksimal 7 hari). 🤝\n\n"+
+				"Temanmu juga akan dapat <b>bonus durasi 100%%</b> dari paket VIP yang mereka beli (maksimal 7 hari). 🤝\n"+
+				"<b>Bonus Referral bisa diuangkan</b> dan akan mendapatkan 20%% dari total durasi, estimasi hitungan per hari sebesar Rp400.\n"+
+				"Contoh: total durasi kamu yang didapatkan dari bonus referral sebanyak 10 hari (10 X Rp400 = Rp4000)\n\n"+
 				"🔑 Mau pakai referral code dari teman? Ketik <b>/referral</b> lalu masukkan kodenya.\n\n"+
 				"Kalau ada yang mau ditanya, chat aja admin @domi_nuc ya!",
 			getGreeting(), user.FirstName,
@@ -1104,11 +1094,9 @@ func main() {
 				continue
 			}
 
-			replacer := strings.NewReplacer(
-				"(", "",
-				")", "",
-			)
-			title := replacer.Replace(fmt.Sprint(row[0]))
+			title := fmt.Sprint(row[0])
+			title = strings.ReplaceAll(title, "(", " ")
+			title = strings.ReplaceAll(title, ")", " ")
 			title = cleanTitle(title)
 			seriesID := fmt.Sprint(row[1])
 			status := fmt.Sprint(row[3])
@@ -1139,6 +1127,7 @@ func main() {
 			files, err := os.ReadDir(targetDir)
 			now := GetJakartaTime()
 			videoCol := db.Collection("videos")
+			dramaCol := db.Collection("drama")
 			totalPart := 0
 			// var targetFile string
 
@@ -1160,14 +1149,13 @@ func main() {
 				videoURL := fmt.Sprintf("%s/%s/%s.mp4", parentDir, titleFolder, partSlug)
 
 				video := models.Video{
-					Title:            partTitle,
-					Slug:             partSlug,
-					VIPOnly:          i != 1, // part 1 gratis, lainnya VIP
-					VideoURL:         videoURL,
-					UploadTime:       now,
-					Part:             i,
-					TotalPart:        totalPart,
-					TelegramSeriesID: telegramLink,
+					Title:      partTitle,
+					Slug:       partSlug,
+					VIPOnly:    i != 1, // part 1 gratis, lainnya VIP
+					VideoURL:   videoURL,
+					UploadTime: now,
+					Part:       i,
+					TotalPart:  totalPart,
 				}
 
 				_, err := videoCol.InsertOne(ctx, video)
@@ -1177,7 +1165,24 @@ func main() {
 				}
 			}
 
-			msg := fmt.Sprintf("✅ %d video berhasil ditambahkan untuk judul <b>%s</b>", totalPart, title)
+			drama := models.Drama{
+				Id:               seriesID,
+				Title:            title,
+				Slug:             titleFolder,
+				TotalPart:        totalPart,
+				KeyWord:          "", // part 1 gratis, lainnya VIP
+				Cast:             "",
+				Tag:              "",
+				TelegramSeriesID: telegramLink,
+			}
+
+			_, err = dramaCol.InsertOne(ctx, drama)
+			if err != nil {
+				log.Println("❌ Gagal insert drama:", err)
+				return c.Send("❌ Gagal menyimpan ke database.")
+			}
+
+			msg := fmt.Sprintf("✅ Drama berhasil ditambahkan untuk judul <b>%s</b>\n✅ %d video berhasil ditambahkan untuk judul <b>%s</b>", title, totalPart, title)
 			c.Send(fmt.Sprintf("%s, Uploading the video...", msg), telebot.ModeHTML)
 
 			part := 1
@@ -1248,7 +1253,7 @@ func main() {
 				}
 			}
 			cover := fmt.Sprintf("cover_%s.jpg", titleFolder)
-			generatePost(c, title, part)
+			generatePost(c, fmt.Sprint(row[0]), title, part)
 			os.Remove(cover)
 
 			if err := os.RemoveAll(targetDir); err != nil {
@@ -1421,16 +1426,16 @@ func main() {
 	})
 
 	bot.Handle(&telebot.Btn{Unique: "vip_1d"}, func(c telebot.Context) error {
-		return sendTrakteerLink(c, "vip_1d")
+		return sendQris(c, "vip_1d")
 	})
 	bot.Handle(&telebot.Btn{Unique: "vip_3d"}, func(c telebot.Context) error {
-		return sendTrakteerLink(c, "vip_3d")
+		return sendQris(c, "vip_3d")
 	})
 	bot.Handle(&telebot.Btn{Unique: "vip_7d"}, func(c telebot.Context) error {
-		return sendTrakteerLink(c, "vip_7d")
+		return sendQris(c, "vip_7d")
 	})
 	bot.Handle(&telebot.Btn{Unique: "vip_30d"}, func(c telebot.Context) error {
-		return sendTrakteerLink(c, "vip_30d")
+		return sendQris(c, "vip_30d")
 	})
 
 	// 🔙 Kembali
@@ -1454,7 +1459,6 @@ func main() {
 		if lastMsg, ok := lastVideoMessages[c.Chat().ID]; ok {
 			_ = bot.Delete(lastMsg)
 		}
-		handleVIP(c)
 
 		return nil
 	})
@@ -1661,7 +1665,7 @@ func main() {
 	log.Println("🤖 Bot is running...")
 	go bot.Start() // Jalankan bot
 
-	http.HandleFunc("/webhook/trakteer", handleTrakteerWebhook)
+	http.HandleFunc("/webhook/pakasir", handleWebhook)
 	log.Println("Listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
