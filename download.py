@@ -66,7 +66,7 @@ def merge_drama(final_dir, limit):
                 "-c:v", "libx264", 
                 "-crf", str(compress_crf), 
                 "-preset", compress_preset,
-                "-c:a", "aac", "-b:a", "96k", "-threads", "2" # Standardize audio bitrate
+                "-c:a", "aac", "-b:a", "96k", "-threads", "2", # Standardize audio bitrate
                 str(output_file)
             ]
 
