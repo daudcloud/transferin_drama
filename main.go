@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 	"github.com/skip2/go-qrcode"
@@ -40,6 +41,8 @@ var (
 	db  *mongo.Database
 	ctx = context.Background()
 )
+
+var mc = memcache.New("127.0.0.1:11211")
 
 var qrLink = map[string]int{
 	"vip_1d":  2000,
@@ -85,6 +88,50 @@ const (
 	spreadsheetID = "1IRnsdu7xEWL3kPApxHBwlew8uf2YmjPc1lcZk6U58ng"
 	sheetName     = "sheet1"
 )
+
+func getCachedVideo(slug string) (*models.Video, error) {
+	key := "fileid:" + slug
+
+	item, err := mc.Get(key)
+	if err != nil {
+		return nil, err
+	}
+
+	var video models.Video
+	err = json.Unmarshal(item.Value, &video)
+	return &video, err
+}
+
+func setCachedVideo(video models.Video) {
+	data, _ := json.Marshal(video)
+	_ = mc.Set(&memcache.Item{
+		Key:        "fileid:" + video.Slug,
+		Value:      data,
+		Expiration: 604800, // 10 menit
+	})
+}
+
+func getCachedUser(uid int64) (*models.User, error) {
+	key := fmt.Sprintf("user:%d", uid)
+
+	item, err := mc.Get(key)
+	if err != nil {
+		return nil, err
+	}
+
+	var user models.User
+	err = json.Unmarshal(item.Value, &user)
+	return &user, err
+}
+
+func setCachedUser(user models.User) {
+	data, _ := json.Marshal(user)
+	_ = mc.Set(&memcache.Item{
+		Key:        fmt.Sprintf("user:%d", user.TelegramUserID),
+		Value:      data,
+		Expiration: 300, // 5 menit
+	})
+}
 
 func GetJakartaTime() time.Time {
 	// RDP (US) time is currently 15 hours 11 minutes behind Jakarta
@@ -708,10 +755,15 @@ func sendVideo(c telebot.Context, slug string) error {
 	partMenu := &telebot.ReplyMarkup{}
 	var video models.Video
 
-	err = videoCollection.FindOne(ctx, bson.M{"slug": slug}).Decode(&video)
-	if err != nil {
-		log.Print(err)
-		return c.Send("❌ Video tidak ditemukan.")
+	cachedVideo, err := getCachedVideo(slug)
+	if err == nil {
+		video = *cachedVideo
+	} else {
+		err = videoCollection.FindOne(ctx, bson.M{"slug": slug}).Decode(&video)
+		if err != nil {
+			return c.Send("❌ Video tidak ditemukan.")
+		}
+		setCachedVideo(video)
 	}
 
 	partInt := video.Part
