@@ -17,7 +17,7 @@ def merge_drama(final_dir, limit):
     
     # Compression settings (Now applied during the merge pass)
     compress_crf = 28  
-    compress_preset = "superfast" 
+    compress_preset = "veryfast" 
 
     def natural_sort_key(s):
         return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
@@ -63,12 +63,10 @@ def merge_drama(final_dir, limit):
             cmd = [
                 "ffmpeg", "-y",
                 "-f", "concat", "-safe", "0", "-i", str(files_txt),
-                "-vf", f"drawtext=text='{watermark_text}':fontcolor=white@0.3:fontsize=24:"
-                       f"x=10:y=(h-text_h)/2:shadowcolor=black@0.3:shadowx=2:shadowy=2",
                 "-c:v", "libx264", 
                 "-crf", str(compress_crf), 
                 "-preset", compress_preset,
-                "-c:a", "aac", "-b:a", "128k", # Standardize audio bitrate
+                "-c:a", "aac", "-b:a", "96k", "-threads", "2" # Standardize audio bitrate
                 str(output_file)
             ]
 
