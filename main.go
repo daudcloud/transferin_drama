@@ -934,7 +934,7 @@ func main() {
 			Timeout: 15 * time.Minute,
 		},
 		Poller: &telebot.LongPoller{Timeout: 10 * time.Second},
-		URL:    "http://localhost:8081",
+		// URL:    "http://localhost:8081",
 	}
 	bot, err = telebot.NewBot(pref)
 	if err != nil {
@@ -1110,7 +1110,7 @@ func main() {
 			fmt.Println("Processing ID:", seriesID)
 			titleFolder := strings.ToLower(strings.ReplaceAll(title, " ", "_")) // untuk folder + slug dasar
 			c.Send(fmt.Sprintf("Starting download for series ID: %s...", seriesID))
-			cmd := exec.Command("python3", "download.py", seriesID)
+			cmd := exec.Command("python3", "download.py", seriesID, title)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			err := cmd.Run()
