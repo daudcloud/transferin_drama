@@ -63,7 +63,7 @@ def merge_drama(final_dir, limit):
             cmd = [
                 "ffmpeg", "-y",
                 "-f", "concat", "-safe", "0", "-i", str(files_txt),
-                "-c:a", "copy",
+                "-c", "copy",
                 str(output_file)
             ]
 
