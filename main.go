@@ -111,6 +111,28 @@ func setCachedVideo(video models.Video) {
 	})
 }
 
+func getCachedDrama(slug string) (*models.Drama, error) {
+	key := "drama:" + slug
+
+	item, err := mc.Get(key)
+	if err != nil {
+		return nil, err
+	}
+
+	var drama models.Drama
+	err = json.Unmarshal(item.Value, &drama)
+	return &drama, err
+}
+
+func setCachedDrama(video models.Drama) {
+	data, _ := json.Marshal(video)
+	_ = mc.Set(&memcache.Item{
+		Key:        "fileid:" + video.Slug,
+		Value:      data,
+		Expiration: 604800, // 10 menit
+	})
+}
+
 func getCachedUser(uid int64) (*models.User, error) {
 	key := fmt.Sprintf("user:%d", uid)
 
@@ -1215,6 +1237,7 @@ func main() {
 					log.Println("❌ Gagal insert video:", err)
 					return c.Send("❌ Gagal menyimpan ke database.")
 				}
+				setCachedVideo(video)
 			}
 
 			drama := models.Drama{
@@ -1233,6 +1256,8 @@ func main() {
 				log.Println("❌ Gagal insert drama:", err)
 				return c.Send("❌ Gagal menyimpan ke database.")
 			}
+
+			setCachedDrama(drama)
 
 			msg := fmt.Sprintf("✅ Drama berhasil ditambahkan untuk judul <b>%s</b>\n✅ %d video berhasil ditambahkan untuk judul <b>%s</b>", title, totalPart, title)
 			c.Send(fmt.Sprintf("%s, Uploading the video...", msg), telebot.ModeHTML)
@@ -1293,10 +1318,6 @@ func main() {
 					}
 
 					part++
-
-					// Simpan ke Redis juga
-					// fileIDKey := "fileid:" + slug
-					// _ = redisClient.Set(ctx, fileIDKey, fileID, 30*24*time.Hour).Err()
 
 					msgs := fmt.Sprintf("✅ FileID berhasil disimpan untuk slug <code>%s</code>:\n<code>%s</code>", slug, fileID)
 					c.Send(msgs, telebot.ModeHTML)
