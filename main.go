@@ -99,6 +99,7 @@ func getCachedVideo(slug string) (*models.Video, error) {
 
 	var video models.Video
 	err = json.Unmarshal(item.Value, &video)
+	log.Print(video)
 	return &video, err
 }
 
@@ -124,10 +125,10 @@ func getCachedDrama(slug string) (*models.Drama, error) {
 	return &drama, err
 }
 
-func setCachedDrama(video models.Drama) {
-	data, _ := json.Marshal(video)
+func setCachedDrama(drama models.Drama) {
+	data, _ := json.Marshal(drama)
 	_ = mc.Set(&memcache.Item{
-		Key:        "fileid:" + video.Slug,
+		Key:        "fileid:" + drama.Slug,
 		Value:      data,
 		Expiration: 604800, // 10 menit
 	})
@@ -1245,7 +1246,7 @@ func main() {
 				Title:            title,
 				Slug:             titleFolder,
 				TotalPart:        totalPart,
-				KeyWord:          "", // part 1 gratis, lainnya VIP
+				KeyWord:          "",
 				Cast:             "",
 				Tag:              "",
 				TelegramSeriesID: telegramLink,
