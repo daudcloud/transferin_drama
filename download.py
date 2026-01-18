@@ -63,10 +63,7 @@ def merge_drama(final_dir, limit):
             cmd = [
                 "ffmpeg", "-y",
                 "-f", "concat", "-safe", "0", "-i", str(files_txt),
-                "-c:v", "libx264", 
-                "-crf", str(compress_crf), 
-                "-preset", compress_preset,
-                "-c:a", "aac", "-b:a", "96k", "-threads", "2", # Standardize audio bitrate
+                "-c:a", "copy",
                 str(output_file)
             ]
 
