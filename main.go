@@ -110,6 +110,7 @@ func setCachedVideo(video models.Video) {
 		Value:      data,
 		Expiration: 604800, // 10 menit
 	})
+	log.Print("cached saved")
 }
 
 func getCachedDrama(slug string) (*models.Drama, error) {
@@ -1238,7 +1239,6 @@ func main() {
 					log.Println("❌ Gagal insert video:", err)
 					return c.Send("❌ Gagal menyimpan ke database.")
 				}
-				setCachedVideo(video)
 			}
 
 			drama := models.Drama{
