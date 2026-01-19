@@ -108,9 +108,8 @@ def fetch_flickreels(target_path, series_id, limit, title):
     )
 
 
-def fetch_dramabox(target_path, series_id, limit, title):
+def fetch_dramabox(target_path, series_id, limit, title, cover_url):
     ep_url = f"https://api.sansekai.my.id/api/dramabox/allepisode?bookId={series_id}"
-    detail_url = f"https://api.sansekai.my.id/api/dramabox/detail?bookId={series_id}"
 
     episodes = fetch_json_with_retry(ep_url)
     detail = fetch_json_with_retry(detail_url)
@@ -118,7 +117,7 @@ def fetch_dramabox(target_path, series_id, limit, title):
     if not episodes or not detail:
         return
 
-    cover = detail.get("coverWap")
+    cover = coverUrl
 
     def extract_url(ep, i):
         try:
@@ -161,11 +160,11 @@ def process_episodes(base_path, title, episodes, limit, url_getter, cover_url):
 # ENTRY POINT
 # =========================
 
-def download_drama(path, series_id, limit, title, platform):
+def download_drama(path, series_id, limit, title, platform, coverUrl):
     if platform == "flickreels":
         fetch_flickreels(path, series_id, limit, title)
     elif platform == "dramabox":
-        fetch_dramabox(path, series_id, limit, title)
+        fetch_dramabox(path, series_id, limit, title, coverUrl)
     else:
         print("❌ Unknown platform")
 
@@ -180,6 +179,7 @@ if __name__ == "__main__":
         series_id=sys.argv[1],
         limit=16,
         title=sys.argv[2],
-        platform=sys.argv[3]
+        platform=sys.argv[3],
+        coverUrl=sys.argv[4]
     )
     # download_drama(r"C:\\Users\hp\melolo", 41000103119, 16, "Perwira Ganteng Ngebet Nikah", "dramabox")
