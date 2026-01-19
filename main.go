@@ -1180,6 +1180,7 @@ func main() {
 			title = strings.ReplaceAll(title, ")", " ")
 			title = cleanTitle(title)
 			seriesID := fmt.Sprint(row[1])
+			coverUrl := fmt.Sprint(row[2])
 			status := fmt.Sprint(row[3])
 			telegramSeriesID := fmt.Sprint(row[4])
 			platform := fmt.Sprint(row[5])
@@ -1192,7 +1193,7 @@ func main() {
 			fmt.Println("Processing ID:", seriesID)
 			titleFolder := strings.ToLower(strings.ReplaceAll(title, " ", "_")) // untuk folder + slug dasar
 			c.Send(fmt.Sprintf("Starting download for series ID: %s...", seriesID))
-			cmd := exec.Command("python3", "download.py", seriesID, title, platform)
+			cmd := exec.Command("python3", "download.py", seriesID, title, platform, coverUrl)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			err := cmd.Run()
