@@ -159,11 +159,11 @@ def process_episodes(base_path, title, episodes, limit, url_getter, cover_url):
 # ENTRY POINT
 # =========================
 
-def download_drama(path, series_id, limit, title, platform, coverUrl):
+def download_drama(path, series_id, limit, title, platform, cover_url):
     if platform == "flickreels":
         fetch_flickreels(path, series_id, limit, title)
     elif platform == "dramabox":
-        fetch_dramabox(path, series_id, limit, title, coverUrl)
+        fetch_dramabox(path, series_id, limit, title, cover_url)
     else:
         print("❌ Unknown platform")
 
