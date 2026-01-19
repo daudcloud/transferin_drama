@@ -235,13 +235,13 @@ def download_drama(target_path, series_id, merge_limit, title, platform):
             fetch_dramabox(target_path, series_id, merge_limit, title)
 
 if __name__ == "__main__":
-    # if len(sys.argv) >= 2:
-    #     target_id = sys.argv[1]
-    #     title = sys.argv[2]
-    #     platform = sys.argv[3]
-    #     folder = "home/melolo"
-    #     limit = 16
-    #     download_drama(folder, target_id, limit, title, platform)
-    # else:
-    #     print("Usage: python script.py <series_id>")
-    download_drama(r"C:\\Users\hp\melolo", 41000113177, 16, "Pesona Istri Manis Sang CEO(Sulih Suara)", "dramabox")
+    if len(sys.argv) >= 2:
+        target_id = sys.argv[1]
+        title = sys.argv[2]
+        platform = sys.argv[3]
+        folder = "home/melolo"
+        limit = 16
+        download_drama(folder, target_id, limit, title, platform)
+    else:
+        print("Usage: python script.py <series_id>")
+    # download_drama(r"C:\\Users\hp\melolo", 41000113177, 16, "Pesona Istri Manis Sang CEO(Sulih Suara)", "dramabox")
