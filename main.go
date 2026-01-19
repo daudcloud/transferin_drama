@@ -735,6 +735,7 @@ var lastVideoMessages = make(map[int64]*telebot.Message)
 func sendVideo(c telebot.Context, slug string) error {
 	user := c.Sender()
 	chatID := user.ID
+	ownerID := os.Getenv("BOT_OWNER_ID")
 	videoCollection := db.Collection("videos")
 	userCollection := db.Collection("users")
 	var existingUser models.User
@@ -859,7 +860,11 @@ func sendVideo(c telebot.Context, slug string) error {
 		}
 		// Refresh Redis cache
 		// _ = redisClient.Set(ctx, fileIDKey, video.FileID, 30*24*time.Hour).Err()
-		sentMsg, err = c.Bot().Send(c.Chat(), videoToSend, opts, partMenu, telebot.ModeHTML)
+		if fmt.Sprint(chatID) != ownerID {
+			sentMsg, err = c.Bot().Send(c.Chat(), videoToSend, partMenu, telebot.ModeHTML)
+		} else {
+			sentMsg, err = c.Bot().Send(c.Chat(), videoToSend, opts, partMenu, telebot.ModeHTML)
+		}
 	}
 	if err != nil {
 		return c.Send("Gagal mengirim video")
@@ -1159,7 +1164,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		readRange := sheetName + "!A2:E"
+		readRange := sheetName + "!A2:F"
 		resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
 		if err != nil {
 			log.Fatal(err)
@@ -1177,6 +1182,7 @@ func main() {
 			seriesID := fmt.Sprint(row[1])
 			status := fmt.Sprint(row[3])
 			telegramSeriesID := fmt.Sprint(row[4])
+			platform := fmt.Sprint(row[5])
 			telegramLink := fmt.Sprintf("https://t.me/DramaTrans/%s", telegramSeriesID)
 
 			if status != "Pending" {
@@ -1186,7 +1192,7 @@ func main() {
 			fmt.Println("Processing ID:", seriesID)
 			titleFolder := strings.ToLower(strings.ReplaceAll(title, " ", "_")) // untuk folder + slug dasar
 			c.Send(fmt.Sprintf("Starting download for series ID: %s...", seriesID))
-			cmd := exec.Command("python3", "download.py", seriesID, title)
+			cmd := exec.Command("python3", "download.py", seriesID, title, platform)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			err := cmd.Run()
