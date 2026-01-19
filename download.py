@@ -132,11 +132,14 @@ def fetch_dramabox(target_path, series_id, limit, title, cover_url):
 # =========================
 
 def process_episodes(base_path, title, episodes, limit, url_getter, cover_url):
+    
+    # 1. Setup Directory 
+    slug_title = title.lower().replace(" ", "_")
     folder = Path(base_path) / title
     folder.mkdir(parents=True, exist_ok=True)
 
     if cover_url:
-        download_file(cover_url, folder / "cover.jpg", "Cover")
+        download_file(cover_url, folder / f"cover_{slug_title}.jpg", "Cover")
 
     with ThreadPoolExecutor(max_workers=5) as pool:
         tasks = []
