@@ -176,7 +176,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     download_drama(
-        target_path="home/melolo",
+        path="home/melolo",
         series_id=sys.argv[1],
         limit=16,
         title=sys.argv[2],
