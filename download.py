@@ -112,9 +112,8 @@ def fetch_dramabox(target_path, series_id, limit, title, cover_url):
     ep_url = f"https://api.sansekai.my.id/api/dramabox/allepisode?bookId={series_id}"
 
     episodes = fetch_json_with_retry(ep_url)
-    detail = fetch_json_with_retry(detail_url)
 
-    if not episodes or not detail:
+    if not episodes:
         return
 
     cover = coverUrl
