@@ -116,7 +116,7 @@ def fetch_dramabox(target_path, series_id, limit, title, cover_url):
     if not episodes:
         return
 
-    cover = coverUrl
+    cover = cover_url
 
     def extract_url(ep, i):
         try:
@@ -179,6 +179,6 @@ if __name__ == "__main__":
         limit=16,
         title=sys.argv[2],
         platform=sys.argv[3],
-        coverUrl=sys.argv[4]
+        cover_url=sys.argv[4]
     )
     # download_drama(r"C:\\Users\hp\melolo", 41000103119, 16, "Perwira Ganteng Ngebet Nikah", "dramabox")
