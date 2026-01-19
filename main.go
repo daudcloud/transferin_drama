@@ -1224,6 +1224,20 @@ func main() {
 				partSlug := fmt.Sprintf("%s_part_%d", titleFolder, i)
 				videoURL := fmt.Sprintf("%s/%s/%s.mp4", parentDir, titleFolder, partSlug)
 
+				filter := bson.M{"slug": partSlug}
+
+				err := videoCol.FindOne(ctx, filter).Err()
+				if err == nil {
+					// Data sudah ada
+					log.Println("⏭️ Skip video (already exists):", partSlug)
+					continue
+				}
+				if err != mongo.ErrNoDocuments {
+					// Error lain (bukan karena data tidak ada)
+					log.Println("❌ Error cek video:", err)
+					return c.Send("❌ Gagal cek data video.")
+				}
+
 				video := models.Video{
 					Title:      partTitle,
 					Slug:       partSlug,
@@ -1234,33 +1248,49 @@ func main() {
 					TotalPart:  totalPart,
 				}
 
-				_, err := videoCol.InsertOne(ctx, video)
+				_, err = videoCol.InsertOne(ctx, video)
 				if err != nil {
 					log.Println("❌ Gagal insert video:", err)
 					return c.Send("❌ Gagal menyimpan ke database.")
 				}
 			}
 
-			drama := models.Drama{
-				Id:               seriesID,
-				Title:            title,
-				Slug:             titleFolder,
-				TotalPart:        totalPart,
-				KeyWord:          "",
-				Cast:             "",
-				Tag:              "",
-				TelegramSeriesID: telegramLink,
+			filter := bson.M{"slug": titleFolder}
+
+			err = dramaCol.FindOne(ctx, filter).Err()
+
+			if err != nil && err != mongo.ErrNoDocuments {
+				// Error DB lain
+				log.Println("❌ Error cek drama:", err)
+				return c.Send("❌ Gagal cek data drama.")
 			}
 
-			_, err = dramaCol.InsertOne(ctx, drama)
-			if err != nil {
-				log.Println("❌ Gagal insert drama:", err)
-				return c.Send("❌ Gagal menyimpan ke database.")
+			if err == mongo.ErrNoDocuments {
+				// Data BELUM ada → insert
+				drama := models.Drama{
+					Id:               seriesID,
+					Title:            title,
+					Slug:             titleFolder,
+					TotalPart:        totalPart,
+					KeyWord:          "",
+					Cast:             "",
+					Tag:              "",
+					TelegramSeriesID: telegramLink,
+				}
+
+				_, err = dramaCol.InsertOne(ctx, drama)
+				if err != nil {
+					log.Println("❌ Gagal insert drama:", err)
+					return c.Send("❌ Gagal menyimpan ke database.")
+				}
+
+				setCachedDrama(drama)
+			} else {
+				// Data SUDAH ada → tidak insert
+				log.Println("⏭️ Drama already exists:", titleFolder)
 			}
-
-			setCachedDrama(drama)
-
 			msg := fmt.Sprintf("✅ Drama berhasil ditambahkan untuk judul <b>%s</b>\n✅ %d video berhasil ditambahkan untuk judul <b>%s</b>", title, totalPart, title)
+
 			c.Send(fmt.Sprintf("%s, Uploading the video...", msg), telebot.ModeHTML)
 
 			part := 1
