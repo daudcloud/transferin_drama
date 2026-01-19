@@ -8,240 +8,178 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-def merge_drama(final_dir, limit):
-    # === SETTINGS ===
-    merge_limit = int(limit)
-    folder = Path(final_dir)
-    title = folder.name.lower().replace(" ", "_")
-    watermark_text = "telegram @DramaTrans"
-    
-    # Compression settings (Now applied during the merge pass)
-    compress_crf = 28  
-    compress_preset = "veryfast" 
 
-    def natural_sort_key(s):
-        return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
+# =========================
+# COMMON HELPERS
+# =========================
 
-    # 1. Collect and filter files
-    all_files = [f for f in os.listdir(folder) if f.lower().endswith(".mp4")]
-    part_files = []
-    for f in all_files:
-        match = re.search(r'ep(\d+)', f, re.IGNORECASE)
-        if match:
-            part_files.append((f, int(match.group(1))))
-    
-    # Sort by episode number
-    part_files.sort(key=lambda x: x[1])
-
-    if not part_files:
-        print("⚠️ No 'epX.mp4' files found.")
-        return
-
-    total_parts = len(part_files)
-    total_batches = math.ceil(total_parts / merge_limit)
-    files_txt = folder / "files.txt"
-
-    try:
-        for batch_num in range(total_batches):
-            start_idx = batch_num * merge_limit
-            end_idx = min(start_idx + merge_limit, total_parts)
-            batch_data = part_files[start_idx:end_idx]
-            batch_filenames = [f[0] for f in batch_data]
-
-            output_file = folder / f"{title}_part_{batch_num+1}.mp4"
-
-            # Create concat list
-            with open(files_txt, "w", encoding="utf-8") as f:
-                for filename in batch_filenames:
-                    # Use absolute paths and escape single quotes for ffmpeg
-                    safe_path = str((folder / filename).absolute()).replace("'", "'\\''")
-                    f.write(f"file '{safe_path}'\n")
-
-            # SINGLE PASS: Merge, Watermark, and Compress
-            # We use 'complex_filter' because concat-demuxer + drawtext 
-            # requires re-encoding anyway.
-            cmd = [
-                "ffmpeg", "-y",
-                "-f", "concat", "-safe", "0", "-i", str(files_txt),
-                "-c", "copy",
-                str(output_file)
-            ]
-
-            print(f"🚀 Processing Batch {batch_num+1}/{total_batches} (EP {batch_data[0][1]}-{batch_data[-1][1]})...")
-            
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                print(f"❌ FFmpeg Error: {result.stderr}")
-                continue
-
-            # 2. Cleanup source files for this batch
-            for filename in batch_filenames:
-                try:
-                    os.remove(folder / filename)
-                except Exception as e:
-                    print(f"⚠️ Could not delete {filename}: {e}")
-
-            print(f"✅ Batch {batch_num+1} complete: {output_file.name}")
-
-    finally:
-        # Final cleanup of temp file
-        if files_txt.exists():
-            files_txt.unlink()
-            print("🧹 Cleaned up temporary files.")
-
-    print("🎉 All tasks finished successfully.")
-
-
-def download_file(url, save_path, desc="file"):
-    max_retries = 3
-    retry_delay = 5
-    
-    for attempt in range(max_retries):
+def fetch_json_with_retry(url, retries=5, timeout=15, delay=3):
+    for attempt in range(retries):
         try:
-            with requests.get(url, timeout=15) as r:
+            r = requests.get(url, timeout=timeout)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            print(f"⚠️ Fetch failed ({attempt+1}/{retries}): {e}")
+            if attempt < retries - 1:
+                time.sleep(delay)
+    print(f"❌ Failed to fetch after {retries} retries: {url}")
+    return None
+
+
+def download_file(url, save_path, desc):
+    for attempt in range(3):
+        try:
+            with requests.get(url, timeout=15, stream=True) as r:
                 r.raise_for_status()
-                with open(save_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=1024*1024):
-                        if chunk: f.write(chunk)
-            print(f"✅ Success: {desc}")
+                with open(save_path, "wb") as f:
+                    for chunk in r.iter_content(1024 * 1024):
+                        if chunk:
+                            f.write(chunk)
+            print(f"✅ Downloaded: {desc}")
             return True
         except Exception as e:
-            print(f"⚠️ Attempt {attempt + 1} failed for {desc}: {e}")
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-    print(f"❌ Final failure: Could not download {desc}")
+            print(f"⚠️ Download failed ({attempt+1}/3): {desc} - {e}")
+            time.sleep(3)
     return False
 
-def fetch_flickreels(target_path, series_id, merge_limit, title):
-    api_url = f"https://api.sansekai.my.id/api/flickreels/detailAndAllEpisode?id={series_id}"
-    
-    print(f"Connecting to Sansekai API...")
-    try:
-        response = requests.get(api_url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-    except Exception as e:
-        print(f"Error fetching data: {e}")
+
+# =========================
+# MERGE FUNCTION
+# =========================
+
+def merge_drama(folder_path, limit):
+    folder = Path(folder_path)
+    title = folder.name.lower().replace(" ", "_")
+    files = sorted(
+        [(f, int(re.search(r'ep(\d+)', f).group(1)))
+         for f in os.listdir(folder) if re.search(r'ep\d+\.mp4', f, re.I)],
+        key=lambda x: x[1]
+    )
+
+    if not files:
+        print("⚠️ No episode files found")
         return
 
-    drama_info = data.get("drama", {})
+    batches = math.ceil(len(files) / limit)
+    files_txt = folder / "files.txt"
+
+    for i in range(batches):
+        batch = files[i * limit:(i + 1) * limit]
+        output = folder / f"{title}_part_{i+1}.mp4"
+
+        with open(files_txt, "w", encoding="utf-8") as f:
+            for name, _ in batch:
+                f.write(f"file '{(folder / name).absolute()}'\n")
+
+        print(f"🚀 Merging batch {i+1}/{batches}")
+        subprocess.run([
+            "ffmpeg", "-y",
+            "-f", "concat", "-safe", "0",
+            "-i", str(files_txt),
+            "-c", "copy",
+            str(output)
+        ],capture_output=True, text=True)
+
+        for name, _ in batch:
+            os.remove(folder / name)
+
+    files_txt.unlink(missing_ok=True)
+    print("🎉 Merge completed")
+
+
+# =========================
+# PLATFORM HANDLERS
+# =========================
+
+def fetch_flickreels(target_path, series_id, limit, title):
+    url = f"https://api.sansekai.my.id/api/flickreels/detailAndAllEpisode?id={series_id}"
+    data = fetch_json_with_retry(url)
+    if not data:
+        return
+
     episodes = data.get("episodes", [])
-    
-    # 1. Setup Directory
-    # raw_title = drama_info.get("title", f"Drama_{series_id}")
-    # series_title = re.sub(r'[() () ]', ' ', raw_title)
-    # series_title = " ".join(series_title.split())
-    series_title = title
-    slug_title = series_title.lower().replace(" ", "_")
-    final_dir = Path(target_path) / series_title
-    final_dir.mkdir(parents=True, exist_ok=True)
+    cover = data.get("drama", {}).get("cover")
 
-    # 2. Download Cover (Synchronous)
-    cover_url = drama_info.get("cover")
-    if cover_url:
-        download_file(cover_url, final_dir / f"cover_{slug_title}.jpg", "Cover Image")
+    process_episodes(
+        target_path, title, episodes, limit,
+        lambda ep, i: ep.get("raw", {}).get("videoUrl"),
+        cover
+    )
 
-    print(f"Series: {series_title} | Total Episodes: {len(episodes)}")
-    
-    # 3. Parallel Download of Episodes
-    # Using 4-5 workers is usually safe; too many might trigger rate limits.
-    tasks = []
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        for ep in episodes:
-            raw_data = ep.get("raw", {})
-            video_url = raw_data.get("videoUrl")
-            if not video_url: continue
 
-            ep_num = ep.get("index", 0) + 1
-            file_path = final_dir / f"ep{ep_num}.mp4"
-            if file_path.exists():
-                print(f"⏭️ Skipping ep{ep_num}.mp4 (already exists)")
-                continue
-            
-            # Queue the download task
-            tasks.append(executor.submit(download_file, video_url, file_path, f"ep{ep_num}.mp4"))
-
-    # Wait for all downloads to finish
-    for task in tasks:
-        task.result()
-
-    # 4. Call Merge function (from previous optimization)
-    print("\n--- Starting Merge Process ---")
-    merge_drama(str(final_dir), merge_limit)
-
-def fetch_dramabox(target_path, series_id, merge_limit, title):
-    api_url = f"https://api.sansekai.my.id/api/dramabox/allepisode?bookId={series_id}"
+def fetch_dramabox(target_path, series_id, limit, title):
+    ep_url = f"https://api.sansekai.my.id/api/dramabox/allepisode?bookId={series_id}"
     detail_url = f"https://api.sansekai.my.id/api/dramabox/detail?bookId={series_id}"
-    
-    print(f"Connecting to Sansekai API...")
-    try:
-        detail_response = requests.get(detail_url, timeout=10)
-        detail_response.raise_for_status()
-        detail_data = detail_response.json()
-        response = requests.get(api_url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-    except Exception as e:
-        print(f"Error fetching data: {e}")
+
+    episodes = fetch_json_with_retry(ep_url)
+    detail = fetch_json_with_retry(detail_url)
+
+    if not episodes or not detail:
         return
 
-    episodes = data
-    
-    # 1. Setup Directory
-    series_title = title
-    slug_title = series_title.lower().replace(" ", "_")
-    final_dir = Path(target_path) / series_title
-    final_dir.mkdir(parents=True, exist_ok=True)
+    cover = detail.get("coverWap")
 
-    # 2. Download Cover (Synchronous)
-    cover_url = detail_data.get('coverWap')
+    def extract_url(ep, i):
+        try:
+            return ep["cdnList"][1]["videoPathList"][1]["videoPath"]
+        except Exception:
+            return None
+
+    process_episodes(target_path, title, episodes, limit, extract_url, cover)
+
+
+# =========================
+# MAIN DOWNLOAD LOGIC
+# =========================
+
+def process_episodes(base_path, title, episodes, limit, url_getter, cover_url):
+    folder = Path(base_path) / title
+    folder.mkdir(parents=True, exist_ok=True)
+
     if cover_url:
-        download_file(cover_url, final_dir / f"cover_{slug_title}.jpg", "Cover Image")
+        download_file(cover_url, folder / "cover.jpg", "Cover")
 
-    print(f"Series: {series_title} | Total Episodes: {len(episodes)}")
-    
-    # 3. Parallel Download of Episodes
-    # Using 4-5 workers is usually safe; too many might trigger rate limits.
-    tasks = []
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        for index, ep in enumerate(episodes):
-            cdn_list = ep.get("cdnList", [])
-            videoPathList = cdn_list[1].get('videoPathList')
-            video_url = videoPathList[1].get('videoPath')
-            if not video_url: continue
-
-            ep_num = index + 1
-            file_path = final_dir / f"ep{ep_num}.mp4"
-            if file_path.exists():
-                print(f"⏭️ Skipping ep{ep_num}.mp4 (already exists)")
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        tasks = []
+        for i, ep in enumerate(episodes):
+            url = url_getter(ep, i)
+            if not url:
                 continue
-            
-            # Queue the download task
-            tasks.append(executor.submit(download_file, video_url, file_path, f"ep{ep_num}.mp4"))
+            file = folder / f"ep{i+1}.mp4"
+            if file.exists():
+                continue
+            tasks.append(pool.submit(download_file, url, file, f"EP {i+1}"))
 
-    # Wait for all downloads to finish
-    for task in tasks:
-        task.result()
+        for t in tasks:
+            t.result()
 
-    # 4. Call Merge function (from previous optimization)
-    print("\n--- Starting Merge Process ---")
-    merge_drama(str(final_dir), merge_limit)
+    merge_drama(folder, limit)
 
-def download_drama(target_path, series_id, merge_limit, title, platform):
-    match platform:
-        case "flickreels": 
-            fetch_flickreels(target_path, series_id, merge_limit, title)
-        case "dramabox":
-            fetch_dramabox(target_path, series_id, merge_limit, title)
+
+# =========================
+# ENTRY POINT
+# =========================
+
+def download_drama(path, series_id, limit, title, platform):
+    if platform == "flickreels":
+        fetch_flickreels(path, series_id, limit, title)
+    elif platform == "dramabox":
+        fetch_dramabox(path, series_id, limit, title)
+    else:
+        print("❌ Unknown platform")
+
 
 if __name__ == "__main__":
-    if len(sys.argv) >= 2:
-        target_id = sys.argv[1]
-        title = sys.argv[2]
-        platform = sys.argv[3]
-        folder = "home/melolo"
-        limit = 16
-        download_drama(folder, target_id, limit, title, platform)
-    else:
-        print("Usage: python script.py <series_id>")
-    # download_drama(r"C:\\Users\hp\melolo", 41000113177, 16, "Pesona Istri Manis Sang CEO(Sulih Suara)", "dramabox")
+    if len(sys.argv) < 4:
+        print("Usage: python script.py <series_id> <title> <platform>")
+        sys.exit(1)
+
+    download_drama(
+        target_path="home/melolo",
+        series_id=sys.argv[1],
+        limit=16,
+        title=sys.argv[2],
+        platform=sys.argv[3]
+    )
+    # download_drama(r"C:\\Users\hp\melolo", 41000103119, 16, "Perwira Ganteng Ngebet Nikah", "dramabox")
