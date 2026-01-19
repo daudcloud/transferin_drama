@@ -112,7 +112,7 @@ def download_file(url, save_path, desc="file"):
     print(f"❌ Final failure: Could not download {desc}")
     return False
 
-def download_drama(target_path, series_id, merge_limit, title):
+def fetch_flickreels(target_path, series_id, merge_limit, title):
     api_url = f"https://api.sansekai.my.id/api/flickreels/detailAndAllEpisode?id={series_id}"
     
     print(f"Connecting to Sansekai API...")
@@ -169,12 +169,79 @@ def download_drama(target_path, series_id, merge_limit, title):
     print("\n--- Starting Merge Process ---")
     merge_drama(str(final_dir), merge_limit)
 
+def fetch_dramabox(target_path, series_id, merge_limit, title):
+    api_url = f"https://api.sansekai.my.id/api/dramabox/allepisode?bookId={series_id}"
+    detail_url = f"https://api.sansekai.my.id/api/dramabox/detail?bookId={series_id}"
+    
+    print(f"Connecting to Sansekai API...")
+    try:
+        detail_response = requests.get(detail_url, timeout=10)
+        detail_response.raise_for_status()
+        detail_data = detail_response.json()
+        response = requests.get(api_url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+        return
+
+    episodes = data
+    
+    # 1. Setup Directory
+    series_title = title
+    slug_title = series_title.lower().replace(" ", "_")
+    final_dir = Path(target_path) / series_title
+    final_dir.mkdir(parents=True, exist_ok=True)
+
+    # 2. Download Cover (Synchronous)
+    cover_url = detail_data.get('coverWap')
+    if cover_url:
+        download_file(cover_url, final_dir / f"cover_{slug_title}.jpg", "Cover Image")
+
+    print(f"Series: {series_title} | Total Episodes: {len(episodes)}")
+    
+    # 3. Parallel Download of Episodes
+    # Using 4-5 workers is usually safe; too many might trigger rate limits.
+    tasks = []
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        for index, ep in enumerate(episodes):
+            cdn_list = ep.get("cdnList", [])
+            videoPathList = cdn_list[1].get('videoPathList')
+            video_url = videoPathList[1].get('videoPath')
+            if not video_url: continue
+
+            ep_num = index + 1
+            file_path = final_dir / f"ep{ep_num}.mp4"
+            if file_path.exists():
+                print(f"⏭️ Skipping ep{ep_num}.mp4 (already exists)")
+                continue
+            
+            # Queue the download task
+            tasks.append(executor.submit(download_file, video_url, file_path, f"ep{ep_num}.mp4"))
+
+    # Wait for all downloads to finish
+    for task in tasks:
+        task.result()
+
+    # 4. Call Merge function (from previous optimization)
+    print("\n--- Starting Merge Process ---")
+    merge_drama(str(final_dir), merge_limit)
+
+def download_drama(target_path, series_id, merge_limit, title, platform):
+    match platform:
+        case "flickreels": 
+            fetch_flickreels(target_path, series_id, merge_limit, title)
+        case "dramabox":
+            fetch_dramabox(target_path, series_id, merge_limit, title)
+
 if __name__ == "__main__":
-    if len(sys.argv) >= 2:
-        target_id = sys.argv[1]
-        title = sys.argv[2]
-        folder = "home/melolo"
-        limit = 16
-        download_drama(folder, target_id, limit, title)
-    else:
-        print("Usage: python script.py <series_id>")
+    # if len(sys.argv) >= 2:
+    #     target_id = sys.argv[1]
+    #     title = sys.argv[2]
+    #     platform = sys.argv[3]
+    #     folder = "home/melolo"
+    #     limit = 16
+    #     download_drama(folder, target_id, limit, title, platform)
+    # else:
+    #     print("Usage: python script.py <series_id>")
+    download_drama(r"C:\\Users\hp\melolo", 41000113177, 16, "Pesona Istri Manis Sang CEO(Sulih Suara)", "dramabox")
