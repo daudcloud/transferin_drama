@@ -860,7 +860,7 @@ func sendVideo(c telebot.Context, slug string) error {
 		}
 		// Refresh Redis cache
 		// _ = redisClient.Set(ctx, fileIDKey, video.FileID, 30*24*time.Hour).Err()
-		if fmt.Sprint(chatID) != ownerID {
+		if fmt.Sprint(chatID) == ownerID {
 			sentMsg, err = c.Bot().Send(c.Chat(), videoToSend, partMenu, telebot.ModeHTML)
 		} else {
 			sentMsg, err = c.Bot().Send(c.Chat(), videoToSend, opts, partMenu, telebot.ModeHTML)
