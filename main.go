@@ -226,7 +226,7 @@ func generatePost(c telebot.Context, strTitle string, title string, totalParts i
 	_, err := bot.Send(c.Chat(), photo)
 
 	if err != nil {
-		return c.Send("Failed generate post: err", telebot.ModeHTML)
+		return c.Send(fmt.Sprintf(`Failed generate post: %v`, err), telebot.ModeHTML)
 	}
 
 	return nil
@@ -1372,9 +1372,7 @@ func main() {
 					return c.Send(fmt.Sprintf("❌ Failed to upload %s after multiple attempts.", f.Name()))
 				}
 			}
-			cover := fmt.Sprintf("cover_%s.jpg", titleFolder)
 			generatePost(c, fmt.Sprint(row[0]), title, part)
-			os.Remove(cover)
 
 			if err := os.RemoveAll(targetDir); err != nil {
 				log.Printf("❌ Gagal menghapus folder %s: %v", targetDir, err)
