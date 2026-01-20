@@ -17,7 +17,13 @@ func Connect(uri, db string) error {
 	defer cancel()
 
 	var err error
-	client, err = mongo.Connect(ctx, options.Client().ApplyURI(uri))
+	clientOptions := options.Client().
+		ApplyURI(uri).
+		SetMaxPoolSize(500). // Increase pool size
+		SetMinPoolSize(50).  // Keep connections warm
+		SetMaxConnIdleTime(30 * time.Second).
+		SetServerSelectionTimeout(5 * time.Second)
+	client, err = mongo.Connect(ctx, clientOptions)
 	if err == nil {
 		databaseName = db
 	}
