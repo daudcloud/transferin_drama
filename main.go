@@ -10,10 +10,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -39,7 +42,11 @@ var redisClient *redis.Client
 var (
 	bot *telebot.Bot
 	db  *mongo.Database
-	ctx = context.Background()
+)
+
+var (
+	lastVideoMessagesMu sync.RWMutex
+	lastVideoMessages   = make(map[int64]*telebot.Message)
 )
 
 var mc = memcache.New("127.0.0.1:11211")
@@ -94,13 +101,20 @@ func getCachedVideo(slug string) (*models.Video, error) {
 
 	item, err := mc.Get(key)
 	if err != nil {
+		if err == memcache.ErrCacheMiss {
+			return nil, err // Cache miss is expected
+		}
+		log.Printf("⚠️ Memcache error for %s: %v", slug, err)
 		return nil, err
 	}
 
 	var video models.Video
-	err = json.Unmarshal(item.Value, &video)
-	log.Print(video)
-	return &video, err
+	if err := json.Unmarshal(item.Value, &video); err != nil {
+		log.Printf("⚠️ Failed to unmarshal cached video: %v", err)
+		return nil, err
+	}
+
+	return &video, nil
 }
 
 func setCachedVideo(video models.Video) {
@@ -239,6 +253,9 @@ func handleVIP(c telebot.Context) error {
 	user := c.Sender()
 	userCollection := db.Collection("users")
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	var u models.User
 	err := userCollection.FindOne(ctx, bson.M{"telegram_user_id": user.ID}).Decode(&u)
 	if err != nil {
@@ -296,6 +313,9 @@ func handleVIP(c telebot.Context) error {
 func handleStatus(c telebot.Context) error {
 	user := c.Sender()
 	userCollection := db.Collection("users")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	var u models.User
 	err := userCollection.FindOne(ctx, bson.M{"telegram_user_id": user.ID}).Decode(&u)
@@ -393,6 +413,9 @@ func sendQris(c telebot.Context, vipCode string) error {
 	user := c.Sender()
 	userCollection := db.Collection("users")
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	var u models.User
 
 	result := userCollection.FindOne(ctx, bson.M{"telegram_user_id": user.ID})
@@ -423,7 +446,9 @@ func sendQris(c telebot.Context, vipCode string) error {
 		log.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Fatal(err)
@@ -446,6 +471,12 @@ func sendQris(c telebot.Context, vipCode string) error {
 		fmt.Printf("Error generating QR code: %v\n", err)
 		return nil
 	}
+
+	defer func() {
+		if err := os.Remove(filename); err != nil {
+			log.Printf("⚠️ Failed to cleanup QR file: %v", err)
+		}
+	}()
 
 	fmt.Println("QR Code saved to:", filename)
 
@@ -526,7 +557,9 @@ func sendQris(c telebot.Context, vipCode string) error {
 		return c.Send("Terjadi kesalahan!")
 	}
 
+	lastVideoMessagesMu.Lock()
 	lastVideoMessages[telegramID] = sentMsg
+	lastVideoMessagesMu.Unlock()
 	return nil
 }
 
@@ -543,12 +576,20 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
+
+	w.WriteHeader(http.StatusOK)
+
+	go processPaymentWebhook(payload, w)
+}
+
+func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter) {
 	amount, _ := payload["amount"].(float64)
-	log.Print(amount)
 	order_id, _ := payload["order_id"].(string)
 	log.Printf("🔔 Received Order ID: %s", order_id)
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	pendingCol := db.Collection("transactionPending")
 	successCol := db.Collection("transactionSuccess")
 	userCol := db.Collection("users")
@@ -733,7 +774,6 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("✅ VIP activated for user ID %d with transaction ID %s (duration: %d hari)", pendingTx.TelegramID, order_id, duration)
-	w.WriteHeader(http.StatusOK)
 }
 
 func sameDay(t1, t2 time.Time) bool {
@@ -742,41 +782,70 @@ func sameDay(t1, t2 time.Time) bool {
 	return y1 == y2 && m1 == m2 && d1 == d2
 }
 
-var lastVideoMessages = make(map[int64]*telebot.Message)
-
 func sendVideo(c telebot.Context, slug string) error {
 	user := c.Sender()
 	chatID := user.ID
 	ownerID := os.Getenv("BOT_OWNER_ID")
+
+	// Use request-scoped context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	videoCollection := db.Collection("videos")
 	userCollection := db.Collection("users")
-	var existingUser models.User
-	filter := bson.M{"telegram_user_id": user.ID}
 	now := GetJakartaTime()
-	err := userCollection.FindOne(ctx, filter).Decode(&existingUser)
-	if err != nil {
-		newUser := models.User{
-			TelegramName:     strings.TrimSpace(user.FirstName + " " + user.LastName),
-			TelegramUsername: user.Username,
-			TelegramUserID:   user.ID,
-			IsVIP:            false,
-			DailyLimit:       10,
-			LastAccess:       now,
-			CreatedAt:        now,
-			Code:             generateUniqueCode(),
-		}
-		_, err = userCollection.InsertOne(ctx, newUser)
-		if err != nil {
-			log.Println("❌ Failed to insert user:", err)
-		} else {
-			log.Printf("✅ New user saved: %s (%s)", newUser.TelegramName, newUser.TelegramUsername)
-		}
-		existingUser = newUser
+
+	// ============================================
+	// OPTIMIZATION 1: Single Upsert Instead of Find + Insert/Update
+	// ============================================
+	var existingUser models.User
+
+	// Use FindOneAndUpdate with upsert to handle both new and existing users in ONE query
+	filter := bson.M{"telegram_user_id": user.ID}
+	update := bson.M{
+		"$setOnInsert": bson.M{
+			"telegram_name":     strings.TrimSpace(user.FirstName + " " + user.LastName),
+			"telegram_username": user.Username,
+			"telegram_user_id":  user.ID,
+			"is_vip":            false,
+			"daily_limit":       10,
+			"created_at":        now,
+			"code":              generateUniqueCode(),
+		},
+		"$set": bson.M{
+			"last_access": now,
+		},
 	}
 
+	opts := options.FindOneAndUpdate().
+		SetUpsert(true).
+		SetReturnDocument(options.After)
+
+	err := userCollection.FindOneAndUpdate(ctx, filter, update, opts).Decode(&existingUser)
+	if err != nil {
+		log.Println("❌ Failed to upsert user:", err)
+		return c.Send("❌ Terjadi kesalahan sistem.")
+	}
+
+	// ============================================
+	// OPTIMIZATION 2: Reset daily limit if new day
+	// ============================================
 	if !sameDay(existingUser.LastAccess, now) {
 		existingUser.DailyLimit = 10
+		// Update immediately in single query
+		_, err := userCollection.UpdateOne(
+			ctx,
+			bson.M{"telegram_user_id": user.ID},
+			bson.M{"$set": bson.M{"daily_limit": 10}},
+		)
+		if err != nil {
+			log.Println("⚠️ Failed to reset daily limit:", err)
+		}
 	}
+
+	// ============================================
+	// OPTIMIZATION 3: Handle VIP expiration
+	// ============================================
 	if existingUser.ExpireTime != nil && existingUser.ExpireTime.Before(now) {
 		_, err := userCollection.UpdateOne(
 			ctx,
@@ -784,12 +853,14 @@ func sendVideo(c telebot.Context, slug string) error {
 			bson.M{"$set": bson.M{"expire_time": nil, "is_vip": false}},
 		)
 		if err != nil {
-			return c.Send("❌ Ada kesalahan sistem.")
+			log.Println("⚠️ Failed to update VIP status:", err)
 		}
 		existingUser.IsVIP = false
 	}
 
-	partMenu := &telebot.ReplyMarkup{}
+	// ============================================
+	// OPTIMIZATION 4: Get video from cache first
+	// ============================================
 	var video models.Video
 
 	cachedVideo, err := getCachedVideo(slug)
@@ -803,39 +874,46 @@ func sendVideo(c telebot.Context, slug string) error {
 		setCachedVideo(video)
 	}
 
-	partInt := video.Part
-	nextPart := partInt + 1
-	prevPart := partInt - 1
-	nextBtn = partMenu.Data("Next Part", "next_part", fmt.Sprintf("%s|%d", slug, nextPart))
-	prevBtn = partMenu.Data("Previous Part", "prev_part", fmt.Sprintf("%s|%d", slug, prevPart))
-
-	// VIP check
+	// ============================================
+	// VIP Check
+	// ============================================
 	if video.VIPOnly && !existingUser.IsVIP {
 		return c.Send("🔐 Video ini hanya bisa diakses oleh pengguna VIP.\n\nKetik /vip untuk upgrade.")
 	}
 
+	// ============================================
+	// OPTIMIZATION 5: Batch limit update with other fields
+	// ============================================
 	if !existingUser.IsVIP {
 		if existingUser.DailyLimit <= 0 {
 			return c.Send("❌ Batas harian kamu sudah habis. Silakan tunggu besok atau upgrade VIP.")
 		}
-		// Decrease limit
-		existingUser.DailyLimit--
-		existingUser.LastAccess = now
 
-		// Save changes
-		_, err := userCollection.UpdateOne(ctx,
+		// Single update query instead of separate ones
+		_, err := userCollection.UpdateOne(
+			ctx,
 			bson.M{"telegram_user_id": user.ID},
 			bson.M{
-				"$set": bson.M{
-					"daily_limit": existingUser.DailyLimit,
-					"last_access": existingUser.LastAccess,
-				},
+				"$inc": bson.M{"daily_limit": -1}, // Decrement atomically
+				"$set": bson.M{"last_access": now},
 			},
 		)
 		if err != nil {
 			log.Println("❌ Failed to update user limit:", err)
 		}
+
+		existingUser.DailyLimit--
 	}
+
+	// ============================================
+	// Build navigation buttons
+	// ============================================
+	partMenu := &telebot.ReplyMarkup{}
+	partInt := video.Part
+	nextPart := partInt + 1
+	prevPart := partInt - 1
+	nextBtn = partMenu.Data("Next Part", "next_part", fmt.Sprintf("%s|%d", slug, nextPart))
+	prevBtn = partMenu.Data("Previous Part", "prev_part", fmt.Sprintf("%s|%d", slug, prevPart))
 
 	if video.Part == 1 {
 		partMenu.Inline(partMenu.Row(nextBtn))
@@ -845,44 +923,38 @@ func sendVideo(c telebot.Context, slug string) error {
 		partMenu.Inline(partMenu.Row(prevBtn, nextBtn))
 	}
 
-	opts := &telebot.SendOptions{
+	options := &telebot.SendOptions{
 		Protected: true,
 	}
 
 	var sentMsg *telebot.Message
 
-	// 1️⃣ Check Redis for FileID
-	// fileIDKey := "fileid:" + slug
-	// cachedFileID, err := redisClient.Get(ctx, fileIDKey).Result()
-	// if err == nil && cachedFileID != "" {
-	// 	log.Println("📥 Using cached FileID from Redis:", cachedFileID)
-	// 	videoToSend := &telebot.Video{
-	// 		File:    telebot.File{FileID: cachedFileID},
-	// 		Caption: fmt.Sprintf("🎞️ <b>%s</b>\n\nDipersembahkan oleh DRAMATRANS", video.Title),
-	// 	}
-	// 	return c.Send(videoToSend, opts, partMenu, telebot.ModeHTML)
-	// }
-
-	// 2️⃣ If Redis missed, check MongoDB for backup
+	// ============================================
+	// Send video
+	// ============================================
 	if video.FileID != "" {
 		log.Println("📥 Using backup FileID from DB:", video.FileID)
 		videoToSend := &telebot.Video{
 			File:    telebot.File{FileID: video.FileID},
 			Caption: fmt.Sprintf("🎞️ <b>%s</b>\n\nDipersembahkan oleh DRAMATRANS", video.Title),
 		}
-		// Refresh Redis cache
-		// _ = redisClient.Set(ctx, fileIDKey, video.FileID, 30*24*time.Hour).Err()
+
 		if fmt.Sprint(chatID) == ownerID {
 			sentMsg, err = c.Bot().Send(c.Chat(), videoToSend, partMenu, telebot.ModeHTML)
 		} else {
-			sentMsg, err = c.Bot().Send(c.Chat(), videoToSend, opts, partMenu, telebot.ModeHTML)
+			sentMsg, err = c.Bot().Send(c.Chat(), videoToSend, options, partMenu, telebot.ModeHTML)
 		}
 	}
+
 	if err != nil {
 		return c.Send("Gagal mengirim video")
 	}
 
+	// Store message with mutex protection
+	lastVideoMessagesMu.Lock()
 	lastVideoMessages[chatID] = sentMsg
+	lastVideoMessagesMu.Unlock()
+
 	return nil
 }
 
@@ -999,10 +1071,15 @@ func main() {
 
 	log.Print(now.Format("02 January 2006 - 15:04"))
 
+	var waitingForReferralMu sync.RWMutex
 	var waitingForReferral = make(map[int64]bool)
 
 	mongoURI := os.Getenv("MONGO_URI")
 	dbName := os.Getenv("MONGO_DB")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
 	if err != nil {
 		log.Fatal("❌ MongoDB connection failed:", err)
@@ -1062,6 +1139,9 @@ func main() {
 	bot.Handle("/start", func(c telebot.Context) error {
 		slug := c.Data()
 		user := c.Sender()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 
 		if slug != "" {
 			sendVideo(c, slug)
@@ -1138,12 +1218,18 @@ func main() {
 	bot.Handle("/status", handleStatus)
 
 	bot.Handle("/referral", func(c telebot.Context) error {
+		waitingForReferralMu.Lock()
 		waitingForReferral[c.Sender().ID] = true
+		waitingForReferralMu.Unlock()
 		return c.Send("Please send me your referral code now.")
 	})
 
 	bot.Handle("/process", func(c telebot.Context) error {
 		ownerID := os.Getenv("BOT_OWNER_ID")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
 		if fmt.Sprint(c.Sender().ID) != ownerID {
 			return c.Send("❌ Kamu tidak punya akses ke perintah ini.")
 		}
@@ -1537,9 +1623,11 @@ func main() {
 	})
 
 	bot.Handle(telebot.OnText, func(c telebot.Context) error {
+		waitingForReferralMu.RLock()
 		if waitingForReferral[c.Sender().ID] {
 			delete(waitingForReferral, c.Sender().ID) // remove state after receiving
 			code := strings.TrimSpace(c.Text())
+			waitingForReferralMu.RUnlock()
 			if code == "" {
 				return c.Send("Referral anda adalah ")
 			}
@@ -1579,9 +1667,11 @@ func main() {
 	bot.Handle(&telebot.Btn{Unique: "cancel_payment"}, func(c telebot.Context) error {
 		log.Print(c.Chat().ID)
 
+		lastVideoMessagesMu.RLock()
 		if lastMsg, ok := lastVideoMessages[c.Chat().ID]; ok {
 			_ = bot.Delete(lastMsg)
 		}
+		lastVideoMessagesMu.RUnlock()
 
 		return nil
 	})
@@ -1677,6 +1767,8 @@ func main() {
 	})
 
 	bot.Handle("/addduration", func(c telebot.Context) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 		ownerID := os.Getenv("BOT_OWNER_ID")
 		if fmt.Sprint(c.Sender().ID) != ownerID {
 			return c.Send("❌ Kamu tidak punya akses ke perintah ini.")
@@ -1785,12 +1877,53 @@ func main() {
 		{Text: "status", Description: "Cek status akun"},
 	})
 
-	log.Println("🤖 Bot is running...")
-	go bot.Start() // Jalankan bot
-
 	http.HandleFunc("/webhook/pakasir", handleWebhook)
-	log.Println("Listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+
+	// Setup signal handling
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Start bot in goroutine
+	go func() {
+		log.Println("🤖 Bot is running...")
+		bot.Start()
+	}()
+
+	// Start HTTP server in goroutine
+	httpServer := &http.Server{
+		Addr:         ":8080",
+		Handler:      nil,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	go func() {
+		log.Println("🌐 Webhook server listening on :8080")
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal
+	<-sigChan
+	log.Println("🛑 Shutdown signal received, gracefully stopping...")
+
+	// Shutdown HTTP server
+
+	if err := httpServer.Shutdown(ctx); err != nil {
+		log.Printf("⚠️ HTTP server shutdown error: %v", err)
+	}
+
+	// Stop bot
+	bot.Stop()
+
+	// Close MongoDB
+	if err := client.Disconnect(ctx); err != nil {
+		log.Printf("⚠️ MongoDB disconnect error: %v", err)
+	}
+
+	log.Println("✅ Shutdown complete")
 }
 
 func getGreeting() string {
