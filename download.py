@@ -161,7 +161,7 @@ def fetch_dramabox(target_path, series_id, limit, title, cover_url):
 # MAIN DOWNLOAD LOGIC
 # =========================
 
-def process_episodes(base_path, title, episodes, limit, url_getter, cover_url):
+def process_episodes(base_path, title, episodes, limit, url_getter, cover_url, max_threads=1):
     
     # 1. Setup Directory 
     slug_title = title.lower().replace(" ", "_")
