@@ -5,6 +5,8 @@ import re
 import subprocess
 import math
 import time
+from PIL import Image
+from pillow_heif import register_heif_opener
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -12,6 +14,31 @@ from pathlib import Path
 # =========================
 # COMMON HELPERS
 # =========================
+
+register_heif_opener()
+
+def ensure_jpg_cover(file_path):
+    """
+    Checks if the file is HEIC and converts it to JPG.
+    If it's already a JPG or something else, it skips conversion.
+    """
+    # Check the extension (case-insensitive)
+    if file_path.suffix.lower() in [".heic", ".heif"]:
+        try:
+            print(f"🔄 Converting {file_path.name} to JPG...")
+            image = Image.open(file_path)
+            
+            jpg_path = file_path.with_suffix(".jpg")
+            image.save(jpg_path, "JPEG", quality=95)
+            
+            # Remove the old HEIC file
+            os.remove(file_path)
+            return jpg_path
+        except Exception as e:
+            print(f"❌ Conversion failed: {e}")
+            return file_path
+            
+    return file_path # Return original path if it's already JPG
 
 def fetch_json_with_retry(url, retries=5, timeout=15, delay=3):
     for attempt in range(retries):
@@ -164,9 +191,14 @@ def process_episodes(base_path, title, episodes, limit, url_getter, cover_url, m
     slug_title = title.lower().replace(" ", "_")
     folder = Path(base_path) / title
     folder.mkdir(parents=True, exist_ok=True)
+    
+    ext = ".heic" if ".heic" in cover_url.lower() else ".jpg"
+    cover_file = folder / f"cover_{slug_title}{ext}"
 
     if cover_url:
-        download_file(cover_url, folder / f"cover_{slug_title}.jpg", "Cover")
+        download_file(cover_url, cover_file, "Cover")
+        
+    final_cover_path = ensure_jpg_cover(cover_file)
         
     def task_wrapper(ep, i):
         file = folder / f"ep{i+1}.mp4"
