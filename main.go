@@ -218,18 +218,18 @@ func generatePost(c telebot.Context, strTitle string, title string, totalParts i
 	cover := fmt.Sprintf("cover_%s.jpg", slug)
 	log.Print(cover)
 
+	filePath := fmt.Sprintf(`%s/%s/%s`, parentDir, title, cover)
+
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		// Handle the case where the file is missing
+		return c.Send(fmt.Sprintf("⚠️ Cover image not found at: %s", filePath))
+	}
+
 	photo := &telebot.Photo{
-		File:    telebot.FromDisk(fmt.Sprintf(`%s/%s/%s`, parentDir, title, cover)),
+		File:    telebot.FromDisk(filePath),
 		Caption: post.String(),
 	}
-
-	_, err := bot.Send(c.Chat(), photo)
-
-	if err != nil {
-		return c.Send(fmt.Sprintf(`Failed generate post: %v`, err), telebot.ModeHTML)
-	}
-
-	return nil
+	return c.Send(photo, telebot.ModeHTML)
 }
 
 func handleVIP(c telebot.Context) error {
