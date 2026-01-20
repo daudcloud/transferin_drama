@@ -198,7 +198,7 @@ def download_drama(path, series_id, limit, title, platform, cover_url):
         fetch_flickreels(path, series_id, limit, title)
     elif platform == "dramabox":
         fetch_dramabox(path, series_id, limit, title, cover_url)
-    elif platform == "melolo"
+    elif platform == "melolo":
         fetch_melolo(path, series_id, limit, title, cover_url)
     else:
         print("❌ Unknown platform")
