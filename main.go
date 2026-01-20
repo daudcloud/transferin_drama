@@ -1377,6 +1377,8 @@ func main() {
 			}
 			generatePost(c, fmt.Sprint(row[0]), title, part)
 
+			time.Sleep(2 * time.Second)
+
 			if err := os.RemoveAll(targetDir); err != nil {
 				log.Printf("❌ Gagal menghapus folder %s: %v", targetDir, err)
 			} else {
