@@ -215,12 +215,21 @@ func generatePost(c telebot.Context, strTitle string, title string, totalParts i
 	post.WriteString("Hubungi admin kami jika ada pertanyaan seputar DramaTrans\n")
 	post.WriteString("☎️<a href=\"https://t.me/domi_nuc\">Admin</a>\n")
 
+	cover := fmt.Sprintf("cover_%s.jpg", slug)
+	log.Print(cover)
+
 	photo := &telebot.Photo{
-		File:    telebot.FromDisk(fmt.Sprintf(`%s/%s/%s`, parentDir, title, fmt.Sprintf("cover_%s.jpg", slug))),
+		File:    telebot.FromDisk(fmt.Sprintf(`%s/%s/%s`, parentDir, title, cover)),
 		Caption: post.String(),
 	}
 
-	return c.Send(photo, telebot.ModeHTML)
+	_, err := bot.Send(c.Chat(), photo)
+
+	if err != nil {
+		return c.Send("Failed generate post", telebot.ModeHTML)
+	}
+
+	return nil
 }
 
 func handleVIP(c telebot.Context) error {
