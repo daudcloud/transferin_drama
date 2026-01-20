@@ -118,7 +118,7 @@ def merge_drama(folder_path, limit):
 # =========================
 # PLATFORM HANDLERS
 # =========================
-def fetch_melolo(target_path, series_id, limit, title, cover_url):
+def fetch_melolo(target_path, series_id, limit, title):
     url = f"https://melolo-api-azure.vercel.app/api/melolo/detail/{series_id}"
     data = fetch_json_with_retry(url)
     
@@ -126,6 +126,7 @@ def fetch_melolo(target_path, series_id, limit, title, cover_url):
         return
         
     video_list = data["data"].get("video_data", {}).get("video_list", [])
+    cover_url = data["data"].get("video_data", {}).get("series_cover")
     
     def extract_url(video_item, i):
         vid = video_item.get("vid")
@@ -228,7 +229,7 @@ def download_drama(path, series_id, limit, title, platform, cover_url):
     elif platform == "dramabox":
         fetch_dramabox(path, series_id, limit, title, cover_url)
     elif platform == "melolo":
-        fetch_melolo(path, series_id, limit, title, cover_url)
+        fetch_melolo(path, series_id, limit, title)
     else:
         print("❌ Unknown platform")
 
