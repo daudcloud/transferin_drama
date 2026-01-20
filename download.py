@@ -91,6 +91,36 @@ def merge_drama(folder_path, limit):
 # =========================
 # PLATFORM HANDLERS
 # =========================
+def fetch_melolo(target_path, series_id, limit, title, cover_url):
+    url = f"https://api.sansekai.my.id/api/melolo/detail?bookId={series_id}"
+    data = fetch_json_with_retry(url)
+    
+    if not data or "data" not in data:
+        return
+        
+    video_list = data["data"].get("video_data", {}).get("video_list", [])
+    
+    def extract_url(video_item, i):
+        vid = video_item.get("vid")
+        if not vid:
+            return None
+        
+        # --- TAMBAHKAN DELAY DI SINI ---
+        # Karena limit 15 hit/menit, kita butuh jeda 4 detik per request.
+        # Jika menggunakan multiple workers, delay ini akan menjaga antrean.
+        print(f"Waiting 4s to stay under rate limit for EP {i+1}...")
+        time.sleep(4) 
+        
+        stream_api = f"https://api.sansekai.my.id/api/melolo/stream?videoId={vid}"
+        stream_data = fetch_json_with_retry(stream_api)
+        
+        if stream_data and "data" in stream_data:
+            return stream_data["data"].get("main_url")
+        return None
+
+    # PENTING: Set max_workers menjadi 1 agar delay 4 detik benar-benar akurat 
+    # untuk setiap hit API. Jika > 1, thread akan jalan berbarengan dan limit jebol.
+    process_episodes(target_path, title, video_list, limit, extract_url, cover_url, max_threads=1)
 
 def fetch_flickreels(target_path, series_id, limit, title):
     url = f"https://api.sansekai.my.id/api/flickreels/detailAndAllEpisode?id={series_id}"
@@ -140,20 +170,21 @@ def process_episodes(base_path, title, episodes, limit, url_getter, cover_url):
 
     if cover_url:
         download_file(cover_url, folder / f"cover_{slug_title}.jpg", "Cover")
+        
+    def task_wrapper(ep, i):
+        file = folder / f"ep{i+1}.mp4"
+        if file.exists():
+            return
+            
+        url = url_getter(ep, i) # Delay terjadi di dalam sini
+        
+        if url:
+            download_file(url, file, f"EP {i+1}")
 
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        tasks = []
-        for i, ep in enumerate(episodes):
-            url = url_getter(ep, i)
-            if not url:
-                continue
-            file = folder / f"ep{i+1}.mp4"
-            if file.exists():
-                continue
-            tasks.append(pool.submit(download_file, url, file, f"EP {i+1}"))
-
-        for t in tasks:
-            t.result()
+    with ThreadPoolExecutor(max_workers=max_threads) as pool:
+        futures = [pool.submit(task_wrapper, ep, i) for i, ep in enumerate(episodes)]
+        for f in futures:
+            f.result()
 
     merge_drama(folder, limit)
 
@@ -167,6 +198,8 @@ def download_drama(path, series_id, limit, title, platform, cover_url):
         fetch_flickreels(path, series_id, limit, title)
     elif platform == "dramabox":
         fetch_dramabox(path, series_id, limit, title, cover_url)
+    elif platform == "melolo"
+        fetch_melolo(path, series_id, limit, title, cover_url)
     else:
         print("❌ Unknown platform")
 
