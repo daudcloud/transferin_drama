@@ -229,6 +229,9 @@ func generatePost(c telebot.Context, strTitle string, title string, totalParts i
 		File:    telebot.FromDisk(filePath),
 		Caption: post.String(),
 	}
+
+	log.Print(photo)
+
 	return c.Send(photo, telebot.ModeHTML)
 }
 
