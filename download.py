@@ -92,7 +92,7 @@ def merge_drama(folder_path, limit):
 # PLATFORM HANDLERS
 # =========================
 def fetch_melolo(target_path, series_id, limit, title, cover_url):
-    url = f"melolo-api-azure.vercel.app/api/melolo/detail/{series_id}"
+    url = f"https://melolo-api-azure.vercel.app/api/melolo/detail/{series_id}"
     data = fetch_json_with_retry(url)
     
     if not data or "data" not in data:
@@ -108,7 +108,7 @@ def fetch_melolo(target_path, series_id, limit, title, cover_url):
         # --- TAMBAHKAN DELAY DI SINI ---
         # Karena limit 15 hit/menit, kita butuh jeda 4 detik per request.
         # Jika menggunakan multiple workers, delay ini akan menjaga antrean.
-        stream_api = f"melolo-api-azure.vercel.app/api/melolo/stream/{vid}"
+        stream_api = f"https://melolo-api-azure.vercel.app/api/melolo/stream/{vid}"
         stream_data = fetch_json_with_retry(stream_api)
         
         if stream_data and "data" in stream_data:
