@@ -108,7 +108,7 @@ def fetch_melolo(target_path, series_id, limit, title, cover_url):
         # --- TAMBAHKAN DELAY DI SINI ---
         # Karena limit 15 hit/menit, kita butuh jeda 4 detik per request.
         # Jika menggunakan multiple workers, delay ini akan menjaga antrean.
-        stream_api = f"https://api.sansekai.my.id/api/melolo/stream?videoId={vid}"
+        stream_api = f"melolo-api-azure.vercel.app/api/melolo/stream/{vid}"
         stream_data = fetch_json_with_retry(stream_api)
         
         if stream_data and "data" in stream_data:
