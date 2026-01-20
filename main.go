@@ -226,7 +226,7 @@ func generatePost(c telebot.Context, strTitle string, title string, totalParts i
 	_, err := bot.Send(c.Chat(), photo)
 
 	if err != nil {
-		return c.Send("Failed generate post", telebot.ModeHTML)
+		return c.Send("Failed generate post: err", telebot.ModeHTML)
 	}
 
 	return nil
