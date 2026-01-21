@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"os"
 
-	// "os/exec"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
@@ -29,11 +29,12 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	// "golang.org/x/oauth2/google"
+	"golang.org/x/oauth2/google"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 
-	// "google.golang.org/api/option"
-	// "google.golang.org/api/sheets/v4"
+	"google.golang.org/api/option"
+	"google.golang.org/api/sheets/v4"
 	"gopkg.in/telebot.v3"
 
 	"transferin-drama/database" // Import your database package
@@ -1276,274 +1277,274 @@ func main() {
 		return c.Send("Please send me your referral code now.")
 	})
 
-	// bot.Handle("/process", func(c telebot.Context) error {
-	// 	ownerID := os.Getenv("BOT_OWNER_ID")
+	bot.Handle("/process", func(c telebot.Context) error {
+		ownerID := os.Getenv("BOT_OWNER_ID")
 
-	// 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	// 	defer cancel()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
 
-	// 	if fmt.Sprint(c.Sender().ID) != ownerID {
-	// 		return c.Send("❌ Kamu tidak punya akses ke perintah ini.")
-	// 	}
+		if fmt.Sprint(c.Sender().ID) != ownerID {
+			return c.Send("❌ Kamu tidak punya akses ke perintah ini.")
+		}
 
-	// 	b, err := os.ReadFile("service-account.json")
-	// 	if err != nil {
-	// 		log.Fatal(err)
-	// 	}
+		b, err := os.ReadFile("service-account.json")
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	// 	config, err := google.JWTConfigFromJSON(b, sheets.SpreadsheetsScope)
-	// 	if err != nil {
-	// 		log.Fatal(err)
-	// 	}
+		config, err := google.JWTConfigFromJSON(b, sheets.SpreadsheetsScope)
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	// 	client := config.Client(ctx)
-	// 	srv, err := sheets.NewService(ctx, option.WithHTTPClient(client))
-	// 	if err != nil {
-	// 		log.Fatal(err)
-	// 	}
+		client := config.Client(ctx)
+		srv, err := sheets.NewService(ctx, option.WithHTTPClient(client))
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	// 	readRange := sheetName + "!A2:F"
-	// 	resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
-	// 	if err != nil {
-	// 		log.Fatal(err)
-	// 	}
+		readRange := sheetName + "!A2:F"
+		resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	// 	for i, row := range resp.Values {
-	// 		if len(row) < 5 {
-	// 			continue
-	// 		}
+		for i, row := range resp.Values {
+			if len(row) < 5 {
+				continue
+			}
 
-	// 		title := fmt.Sprint(row[0])
-	// 		title = strings.ReplaceAll(title, "(", " ")
-	// 		title = strings.ReplaceAll(title, ")", " ")
-	// 		title = cleanTitle(title)
-	// 		seriesID := fmt.Sprint(row[1])
-	// 		coverUrl := fmt.Sprint(row[2])
-	// 		status := fmt.Sprint(row[3])
-	// 		telegramSeriesID := fmt.Sprint(row[4])
-	// 		platform := fmt.Sprint(row[5])
-	// 		telegramLink := fmt.Sprintf("https://t.me/DramaTrans/%s", telegramSeriesID)
+			title := fmt.Sprint(row[0])
+			title = strings.ReplaceAll(title, "(", " ")
+			title = strings.ReplaceAll(title, ")", " ")
+			title = cleanTitle(title)
+			seriesID := fmt.Sprint(row[1])
+			coverUrl := fmt.Sprint(row[2])
+			status := fmt.Sprint(row[3])
+			telegramSeriesID := fmt.Sprint(row[4])
+			platform := fmt.Sprint(row[5])
+			telegramLink := fmt.Sprintf("https://t.me/DramaTrans/%s", telegramSeriesID)
 
-	// 		if status != "Pending" {
-	// 			continue
-	// 		}
+			if status != "Pending" {
+				continue
+			}
 
-	// 		fmt.Println("Processing ID:", seriesID)
-	// 		titleFolder := strings.ToLower(strings.ReplaceAll(title, " ", "_")) // untuk folder + slug dasar
-	// 		c.Send(fmt.Sprintf("Starting download for series ID: %s...", seriesID))
-	// 		cmd := exec.Command("python3", "download.py", seriesID, title, platform, coverUrl)
-	// 		cmd.Stdout = os.Stdout
-	// 		cmd.Stderr = os.Stderr
-	// 		err := cmd.Run()
-	// 		if err != nil {
-	// 			log.Print(err)
-	// 			return c.Send("Failed to download: ")
-	// 		}
-	// 		c.Send("Download complete")
-	// 		baseDir := fmt.Sprintf(`%s/%s`, parentDir, title)
-	// 		// folderName := strings.Join(c.Args(), "")
-	// 		targetDir := filepath.Join(baseDir)
-	// 		log.Println(baseDir)
-	// 		log.Println(targetDir)
-	// 		files, err := os.ReadDir(targetDir)
-	// 		now := GetJakartaTime()
-	// 		videoCol := database.GetVideoCollection()
-	// 		dramaCol := database.GetDramaCollection()
-	// 		totalPart := 0
-	// 		// var targetFile string
+			fmt.Println("Processing ID:", seriesID)
+			titleFolder := strings.ToLower(strings.ReplaceAll(title, " ", "_")) // untuk folder + slug dasar
+			c.Send(fmt.Sprintf("Starting download for series ID: %s...", seriesID))
+			cmd := exec.Command("python3", "download.py", seriesID, title, platform, coverUrl)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			err := cmd.Run()
+			if err != nil {
+				log.Print(err)
+				return c.Send("Failed to download: ")
+			}
+			c.Send("Download complete")
+			baseDir := fmt.Sprintf(`%s/%s`, parentDir, title)
+			// folderName := strings.Join(c.Args(), "")
+			targetDir := filepath.Join(baseDir)
+			log.Println(baseDir)
+			log.Println(targetDir)
+			files, err := os.ReadDir(targetDir)
+			now := GetJakartaTime()
+			videoCol := database.GetVideoCollection()
+			dramaCol := database.GetDramaCollection()
+			totalPart := 0
+			// var targetFile string
 
-	// 		log.Print(len(files))
+			log.Print(len(files))
 
-	// 		for _, f := range files {
-	// 			if !f.IsDir() && filepath.Ext(f.Name()) == ".mp4" {
-	// 				totalPart++
-	// 			}
-	// 		}
+			for _, f := range files {
+				if !f.IsDir() && filepath.Ext(f.Name()) == ".mp4" {
+					totalPart++
+				}
+			}
 
-	// 		if totalPart == 0 {
-	// 			return c.Send("No mp4 files")
-	// 		}
+			if totalPart == 0 {
+				return c.Send("No mp4 files")
+			}
 
-	// 		for i := 1; i <= totalPart; i++ {
-	// 			partTitle := fmt.Sprintf("%s part %d", title, i)
-	// 			partSlug := fmt.Sprintf("%s_part_%d", titleFolder, i)
-	// 			videoURL := fmt.Sprintf("%s/%s/%s.mp4", parentDir, titleFolder, partSlug)
+			for i := 1; i <= totalPart; i++ {
+				partTitle := fmt.Sprintf("%s part %d", title, i)
+				partSlug := fmt.Sprintf("%s_part_%d", titleFolder, i)
+				videoURL := fmt.Sprintf("%s/%s/%s.mp4", parentDir, titleFolder, partSlug)
 
-	// 			filter := bson.M{"slug": partSlug}
+				filter := bson.M{"slug": partSlug}
 
-	// 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	// 			defer cancel()
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
 
-	// 			err := videoCol.FindOne(ctx, filter).Err()
-	// 			if err == nil {
-	// 				// Data sudah ada
-	// 				log.Println("⏭️ Skip video (already exists):", partSlug)
-	// 				continue
-	// 			}
-	// 			if err != mongo.ErrNoDocuments {
-	// 				// Error lain (bukan karena data tidak ada)
-	// 				log.Println("❌ Error cek video:", err)
-	// 				return c.Send("❌ Gagal cek data video.")
-	// 			}
+				err := videoCol.FindOne(ctx, filter).Err()
+				if err == nil {
+					// Data sudah ada
+					log.Println("⏭️ Skip video (already exists):", partSlug)
+					continue
+				}
+				if err != mongo.ErrNoDocuments {
+					// Error lain (bukan karena data tidak ada)
+					log.Println("❌ Error cek video:", err)
+					return c.Send("❌ Gagal cek data video.")
+				}
 
-	// 			video := models.Video{
-	// 				Title:      partTitle,
-	// 				Slug:       partSlug,
-	// 				VIPOnly:    i != 1, // part 1 gratis, lainnya VIP
-	// 				VideoURL:   videoURL,
-	// 				UploadTime: now,
-	// 				Part:       i,
-	// 				TotalPart:  totalPart,
-	// 			}
+				video := models.Video{
+					Title:      partTitle,
+					Slug:       partSlug,
+					VIPOnly:    i != 1, // part 1 gratis, lainnya VIP
+					VideoURL:   videoURL,
+					UploadTime: now,
+					Part:       i,
+					TotalPart:  totalPart,
+				}
 
-	// 			ctx, cancel = context.WithTimeout(context.Background(), 5*time.Minute)
-	// 			defer cancel()
+				ctx, cancel = context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
 
-	// 			_, err = videoCol.InsertOne(ctx, video)
-	// 			if err != nil {
-	// 				log.Println("❌ Gagal insert video:", err)
-	// 				return c.Send("❌ Gagal menyimpan ke database.")
-	// 			}
-	// 		}
+				_, err = videoCol.InsertOne(ctx, video)
+				if err != nil {
+					log.Println("❌ Gagal insert video:", err)
+					return c.Send("❌ Gagal menyimpan ke database.")
+				}
+			}
 
-	// 		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Minute)
-	// 		defer cancel()
+			ctx, cancel = context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
 
-	// 		filter := bson.M{"slug": titleFolder}
+			filter := bson.M{"slug": titleFolder}
 
-	// 		err = dramaCol.FindOne(ctx, filter).Err()
+			err = dramaCol.FindOne(ctx, filter).Err()
 
-	// 		if err != nil && err != mongo.ErrNoDocuments {
-	// 			// Error DB lain
-	// 			log.Println("❌ Error cek drama:", err)
-	// 			return c.Send("❌ Gagal cek data drama.")
-	// 		}
+			if err != nil && err != mongo.ErrNoDocuments {
+				// Error DB lain
+				log.Println("❌ Error cek drama:", err)
+				return c.Send("❌ Gagal cek data drama.")
+			}
 
-	// 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	// 		defer cancel()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
 
-	// 		if err == mongo.ErrNoDocuments {
-	// 			// Data BELUM ada → insert
-	// 			drama := models.Drama{
-	// 				Id:               seriesID,
-	// 				Title:            title,
-	// 				Slug:             titleFolder,
-	// 				TotalPart:        totalPart,
-	// 				KeyWord:          "",
-	// 				Cast:             "",
-	// 				Tag:              "",
-	// 				TelegramSeriesID: telegramLink,
-	// 			}
+			if err == mongo.ErrNoDocuments {
+				// Data BELUM ada → insert
+				drama := models.Drama{
+					Id:               seriesID,
+					Title:            title,
+					Slug:             titleFolder,
+					TotalPart:        totalPart,
+					KeyWord:          "",
+					Cast:             "",
+					Tag:              "",
+					TelegramSeriesID: telegramLink,
+				}
 
-	// 			_, err = dramaCol.InsertOne(ctx, drama)
-	// 			if err != nil {
-	// 				log.Println("❌ Gagal insert drama:", err)
-	// 				return c.Send("❌ Gagal menyimpan ke database.")
-	// 			}
+				_, err = dramaCol.InsertOne(ctx, drama)
+				if err != nil {
+					log.Println("❌ Gagal insert drama:", err)
+					return c.Send("❌ Gagal menyimpan ke database.")
+				}
 
-	// 			setCachedDrama(drama)
-	// 		} else {
-	// 			// Data SUDAH ada → tidak insert
-	// 			log.Println("⏭️ Drama already exists:", titleFolder)
-	// 		}
-	// 		msg := fmt.Sprintf("✅ Drama berhasil ditambahkan untuk judul <b>%s</b>\n✅ %d video berhasil ditambahkan untuk judul <b>%s</b>", title, totalPart, title)
+				setCachedDrama(drama)
+			} else {
+				// Data SUDAH ada → tidak insert
+				log.Println("⏭️ Drama already exists:", titleFolder)
+			}
+			msg := fmt.Sprintf("✅ Drama berhasil ditambahkan untuk judul <b>%s</b>\n✅ %d video berhasil ditambahkan untuk judul <b>%s</b>", title, totalPart, title)
 
-	// 		c.Send(fmt.Sprintf("%s, Uploading the video...", msg), telebot.ModeHTML)
+			c.Send(fmt.Sprintf("%s, Uploading the video...", msg), telebot.ModeHTML)
 
-	// 		part := 1
-	// 		for _, f := range files {
-	// 			if f.IsDir() || filepath.Ext(f.Name()) != ".mp4" {
-	// 				continue
-	// 			}
+			part := 1
+			for _, f := range files {
+				if f.IsDir() || filepath.Ext(f.Name()) != ".mp4" {
+					continue
+				}
 
-	// 			targetFile := filepath.Join(targetDir, f.Name())
-	// 			slug := fmt.Sprintf("%s_part_%d", titleFolder, part)
-	// 			var msg *telebot.Message
-	// 			maxRetries := 3
-	// 			success := false
+				targetFile := filepath.Join(targetDir, f.Name())
+				slug := fmt.Sprintf("%s_part_%d", titleFolder, part)
+				var msg *telebot.Message
+				maxRetries := 3
+				success := false
 
-	// 			for attempt := 1; attempt <= maxRetries; attempt++ {
-	// 				c.Send(fmt.Sprintf("📤 Uploading (Attempt %d/%d): %s", attempt, maxRetries, filepath.Base(targetFile)))
+				for attempt := 1; attempt <= maxRetries; attempt++ {
+					c.Send(fmt.Sprintf("📤 Uploading (Attempt %d/%d): %s", attempt, maxRetries, filepath.Base(targetFile)))
 
-	// 				v := &telebot.Video{
-	// 					File:      telebot.FromDisk(targetFile),
-	// 					Caption:   slug,
-	// 					Streaming: true,
-	// 				}
+					v := &telebot.Video{
+						File:      telebot.FromDisk(targetFile),
+						Caption:   slug,
+						Streaming: true,
+					}
 
-	// 				var err error
-	// 				msg, err = bot.Send(c.Chat(), v)
+					var err error
+					msg, err = bot.Send(c.Chat(), v)
 
-	// 				if err == nil {
-	// 					success = true
-	// 					break // Success! Exit the retry loop
-	// 				}
+					if err == nil {
+						success = true
+						break // Success! Exit the retry loop
+					}
 
-	// 				log.Printf("⚠️ Attempt %d failed for %s: %v", attempt, f.Name(), err)
+					log.Printf("⚠️ Attempt %d failed for %s: %v", attempt, f.Name(), err)
 
-	// 				if attempt < maxRetries {
-	// 					time.Sleep(5 * time.Second) // Wait 5 seconds before retrying
-	// 				} else {
-	// 					log.Printf("❌ Final failure for %s after %d attempts", f.Name(), maxRetries)
-	// 				}
-	// 			}
+					if attempt < maxRetries {
+						time.Sleep(5 * time.Second) // Wait 5 seconds before retrying
+					} else {
+						log.Printf("❌ Final failure for %s after %d attempts", f.Name(), maxRetries)
+					}
+				}
 
-	// 			if success && msg != nil {
-	// 				fileID := msg.Video.FileID
+				if success && msg != nil {
+					fileID := msg.Video.FileID
 
-	// 				filter := bson.M{"slug": slug}
-	// 				update := bson.M{"$set": bson.M{"file_id": fileID}}
+					filter := bson.M{"slug": slug}
+					update := bson.M{"$set": bson.M{"file_id": fileID}}
 
-	// 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	// 				defer cancel()
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+					defer cancel()
 
-	// 				_, err = videoCol.UpdateOne(ctx, filter, update)
-	// 				if err != nil {
-	// 					log.Println("❌ Gagal simpan file_id:", err)
-	// 				}
+					_, err = videoCol.UpdateOne(ctx, filter, update)
+					if err != nil {
+						log.Println("❌ Gagal simpan file_id:", err)
+					}
 
-	// 				if err := os.Remove(targetFile); err != nil {
-	// 					log.Printf("⚠️ Gagal menghapus file %s: %v", targetFile, err)
-	// 				} else {
-	// 					log.Printf("🗑️ File dihapus: %s", targetFile)
-	// 				}
+					if err := os.Remove(targetFile); err != nil {
+						log.Printf("⚠️ Gagal menghapus file %s: %v", targetFile, err)
+					} else {
+						log.Printf("🗑️ File dihapus: %s", targetFile)
+					}
 
-	// 				part++
+					part++
 
-	// 				msgs := fmt.Sprintf("✅ FileID berhasil disimpan untuk slug <code>%s</code>:\n<code>%s</code>", slug, fileID)
-	// 				c.Send(msgs, telebot.ModeHTML)
-	// 			} else {
-	// 				return c.Send(fmt.Sprintf("❌ Failed to upload %s after multiple attempts.", f.Name()))
-	// 			}
-	// 		}
-	// 		generatePost(c, fmt.Sprint(row[0]), title, part)
+					msgs := fmt.Sprintf("✅ FileID berhasil disimpan untuk slug <code>%s</code>:\n<code>%s</code>", slug, fileID)
+					c.Send(msgs, telebot.ModeHTML)
+				} else {
+					return c.Send(fmt.Sprintf("❌ Failed to upload %s after multiple attempts.", f.Name()))
+				}
+			}
+			generatePost(c, fmt.Sprint(row[0]), title, part)
 
-	// 		time.Sleep(2 * time.Second)
+			time.Sleep(2 * time.Second)
 
-	// 		if err := os.RemoveAll(targetDir); err != nil {
-	// 			log.Printf("❌ Gagal menghapus folder %s: %v", targetDir, err)
-	// 		} else {
-	// 			log.Printf("✅ Folder %s berhasil dibersihkan", targetDir)
-	// 		}
-	// 		rowNumber := i + 2 // because start from A2
-	// 		updateRange := fmt.Sprintf("%s!D%d", sheetName, rowNumber)
+			if err := os.RemoveAll(targetDir); err != nil {
+				log.Printf("❌ Gagal menghapus folder %s: %v", targetDir, err)
+			} else {
+				log.Printf("✅ Folder %s berhasil dibersihkan", targetDir)
+			}
+			rowNumber := i + 2 // because start from A2
+			updateRange := fmt.Sprintf("%s!D%d", sheetName, rowNumber)
 
-	// 		_, err = srv.Spreadsheets.Values.Update(
-	// 			spreadsheetID,
-	// 			updateRange,
-	// 			&sheets.ValueRange{
-	// 				Values: [][]interface{}{{"Done"}},
-	// 			},
-	// 		).ValueInputOption("RAW").Do()
+			_, err = srv.Spreadsheets.Values.Update(
+				spreadsheetID,
+				updateRange,
+				&sheets.ValueRange{
+					Values: [][]interface{}{{"Done"}},
+				},
+			).ValueInputOption("RAW").Do()
 
-	// 		if err != nil {
-	// 			log.Println("Failed update status:", err)
-	// 		} else {
-	// 			fmt.Println("Marked Done:", seriesID)
-	// 		}
-	// 	}
-	// 	return c.Send("✅ Semua video berhasil diupload & disimpan.", telebot.ModeHTML)
-	// })
+			if err != nil {
+				log.Println("Failed update status:", err)
+			} else {
+				fmt.Println("Marked Done:", seriesID)
+			}
+		}
+		return c.Send("✅ Semua video berhasil diupload & disimpan.", telebot.ModeHTML)
+	})
 
 	type Tag struct {
 		TagID   int    `json:"tag_id"`
