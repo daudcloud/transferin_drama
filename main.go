@@ -1345,6 +1345,9 @@ func main() {
 
 				filter := bson.M{"slug": partSlug}
 
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+
 				err := videoCol.FindOne(ctx, filter).Err()
 				if err == nil {
 					// Data sudah ada
@@ -1366,6 +1369,9 @@ func main() {
 					Part:       i,
 					TotalPart:  totalPart,
 				}
+
+				ctx, cancel = context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
 
 				_, err = videoCol.InsertOne(ctx, video)
 				if err != nil {
