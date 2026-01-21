@@ -252,7 +252,7 @@ func generatePost(c telebot.Context, strTitle string, title string, totalParts i
 
 func handleVIP(c telebot.Context) error {
 	user := c.Sender()
-	userCollection := db.Collection("users")
+	userCollection := database.GetUserCollection()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -313,7 +313,7 @@ func handleVIP(c telebot.Context) error {
 
 func handleStatus(c telebot.Context) error {
 	user := c.Sender()
-	userCollection := db.Collection("users")
+	userCollection := database.GetUserCollection()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -412,7 +412,7 @@ func generateTransactionID() string {
 func sendQris(c telebot.Context, vipCode string) error {
 
 	user := c.Sender()
-	userCollection := db.Collection("users")
+	userCollection := database.GetUserCollection()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -489,7 +489,7 @@ func sendQris(c telebot.Context, vipCode string) error {
 	telegramID := user.ID
 
 	// Masukkan ke collection transactionPending
-	pendingCol := db.Collection("transactionPending")
+	pendingCol := database.GetTransactionPendingCollection()
 	filter := bson.M{"telegramID": telegramID, "transactionID": transactionID}
 	update := bson.M{
 		"$set": bson.M{
@@ -591,9 +591,9 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	pendingCol := db.Collection("transactionPending")
-	successCol := db.Collection("transactionSuccess")
-	userCol := db.Collection("users")
+	pendingCol := database.GetTransactionPendingCollection()
+	successCol := database.GetTransactionSuccessCollection()
+	userCol := database.GetUserCollection()
 
 	var pendingTx models.TransactionPending
 	err := pendingCol.FindOne(ctx, bson.M{"transactionID": order_id}).Decode(&pendingTx)
@@ -792,8 +792,13 @@ func sendVideo(c telebot.Context, slug string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	videoCollection := db.Collection("videos")
-	userCollection := db.Collection("users")
+	log.Println("🔍 Getting video collection...")
+	videoCollection := database.GetVideoCollection()
+	log.Println("✅ Video collection obtained")
+
+	log.Println("🔍 Getting user collection...")
+	userCollection := database.GetUserCollection()
+	log.Println("✅ User collection obtained")
 	now := GetJakartaTime()
 
 	// ============================================
@@ -974,7 +979,7 @@ func processReferral(c telebot.Context, code string) error {
 		return c.Send("❌ Referral code cannot be empty.")
 	}
 
-	userCollection := db.Collection("users")
+	userCollection := database.GetUserCollection()
 
 	// Get current user from DB
 	var currentUser models.User
@@ -1134,6 +1139,16 @@ func main() {
 	// Buttons
 	menu.Inline(menu.Row(startBtn), menu.Row(vipBtn, statusBtn))
 
+	bot.Handle("/test", func(c telebot.Context) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := database.HealthCheck(ctx); err != nil {
+			return c.Send("❌ Database not connected: " + err.Error())
+		}
+		return c.Send("✅ Database is healthy!")
+	})
+
 	// Handle /start
 	bot.Handle("/start", func(c telebot.Context) error {
 		slug := c.Data()
@@ -1147,7 +1162,7 @@ func main() {
 			return nil
 		}
 
-		userCollection := db.Collection("users")
+		userCollection := database.GetUserCollection()
 		var existingUser models.User
 		filter := bson.M{"telegram_user_id": user.ID}
 
@@ -1306,8 +1321,8 @@ func main() {
 			log.Println(targetDir)
 			files, err := os.ReadDir(targetDir)
 			now := GetJakartaTime()
-			videoCol := db.Collection("videos")
-			dramaCol := db.Collection("drama")
+			videoCol := database.GetVideoCollection()
+			dramaCol := database.GetDramaCollection()
 			totalPart := 0
 			// var targetFile string
 
@@ -1595,7 +1610,7 @@ func main() {
 			}
 			slug := "test_part_1"
 			fileID := msg.Video.FileID
-			videoCollection := db.Collection("videos")
+			videoCollection := database.GetVideoCollection()
 
 			filter := bson.M{"slug": slug}
 			update := bson.M{"$set": bson.M{"file_id": fileID}}
@@ -1737,7 +1752,7 @@ func main() {
 		titleFolder := strings.ToLower(strings.ReplaceAll(title, " ", "_")) // untuk folder + slug dasar
 
 		now := GetJakartaTime()
-		videoCol := db.Collection("videos")
+		videoCol := database.GetVideoCollection()
 
 		for i := 1; i <= totalPart; i++ {
 			partTitle := fmt.Sprintf("%s part %d", title, i)
@@ -1785,7 +1800,7 @@ func main() {
 		}
 
 		var user models.User
-		userCollection := db.Collection("users")
+		userCollection := database.GetUserCollection()
 		err = userCollection.FindOne(ctx, bson.M{"telegram_username": targetUserName}).Decode(&user)
 		if err != nil {
 			return c.Send("❌ User tidak ditemukan.")
@@ -1849,7 +1864,7 @@ func main() {
 
 		slug := args[0]
 		fileID := c.Message().ReplyTo.Video.File.FileID
-		videoCollection := db.Collection("videos")
+		videoCollection := database.GetVideoCollection()
 
 		filter := bson.M{"slug": slug}
 		update := bson.M{"$set": bson.M{"file_id": fileID}}
