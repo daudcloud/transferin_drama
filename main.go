@@ -1380,6 +1380,9 @@ func main() {
 				}
 			}
 
+			ctx, cancel = context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+
 			filter := bson.M{"slug": titleFolder}
 
 			err = dramaCol.FindOne(ctx, filter).Err()
