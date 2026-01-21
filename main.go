@@ -22,7 +22,6 @@ import (
 
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/joho/godotenv"
-	"github.com/redis/go-redis/v9"
 	"github.com/skip2/go-qrcode"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -39,7 +38,6 @@ import (
 	"transferin-drama/models"
 )
 
-var redisClient *redis.Client
 var (
 	bot *telebot.Bot
 	db  *mongo.Database
@@ -350,6 +348,9 @@ func handleStatus(c telebot.Context) error {
 		return c.Send(msg, reply, telebot.ModeHTML)
 	}
 
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	if u.ExpireTime != nil && u.ExpireTime.Before(now) {
 		_, err = userCollection.UpdateOne(
 			ctx,
@@ -502,6 +503,9 @@ func sendQris(c telebot.Context, vipCode string) error {
 	}
 	opts := options.Update().SetUpsert(true)
 
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	_, err = pendingCol.UpdateOne(ctx, filter, update, opts)
 
 	if err != nil {
@@ -603,6 +607,9 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 		return
 	}
 
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	var payer models.User
 	err = userCol.FindOne(ctx, bson.M{"telegram_user_id": pendingTx.TelegramID}).Decode(&payer)
 	if err != nil {
@@ -639,6 +646,10 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 	now := GetJakartaTime()
 	var updatedUser models.User
 	// Update expire_time without querying first
+
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	err = userCol.FindOneAndUpdate(ctx,
 		bson.M{"telegram_user_id": pendingTx.TelegramID},
 		mongo.Pipeline{
@@ -683,6 +694,9 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 
 	if payer.ReferralCode != "" && bonusForReferrer > 0 {
 		var referrer models.User
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 
 		err := userCol.FindOneAndUpdate(ctx,
 			bson.M{"code": payer.ReferralCode},
@@ -746,12 +760,16 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 		ActivatedAt:   now,
 		Duration:      duration,
 	}
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	_, err = successCol.InsertOne(ctx, successTx)
 	if err != nil {
 		log.Printf("❌ Failed to save to transactionSuccess: %v", err)
 	}
 
 	// Hapus dari pending
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	_, err = pendingCol.DeleteOne(ctx, bson.M{"trasactionID": order_id})
 	if err != nil {
 		log.Printf("⚠️ Failed to delete from pending: %v", err)
@@ -837,6 +855,8 @@ func sendVideo(c telebot.Context, slug string) error {
 	// OPTIMIZATION 2: Reset daily limit if new day
 	// ============================================
 	if !sameDay(existingUser.LastAccess, now) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 		existingUser.DailyLimit = 10
 		// Update immediately in single query
 		_, err := userCollection.UpdateOne(
@@ -853,6 +873,8 @@ func sendVideo(c telebot.Context, slug string) error {
 	// OPTIMIZATION 3: Handle VIP expiration
 	// ============================================
 	if existingUser.ExpireTime != nil && existingUser.ExpireTime.Before(now) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 		_, err := userCollection.UpdateOne(
 			ctx,
 			bson.M{"telegram_user_id": user.ID},
@@ -868,6 +890,9 @@ func sendVideo(c telebot.Context, slug string) error {
 	// OPTIMIZATION 4: Get video from cache first
 	// ============================================
 	var video models.Video
+
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	cachedVideo, err := getCachedVideo(slug)
 	if err == nil {
@@ -894,6 +919,9 @@ func sendVideo(c telebot.Context, slug string) error {
 		if existingUser.DailyLimit <= 0 {
 			return c.Send("❌ Batas harian kamu sudah habis. Silakan tunggu besok atau upgrade VIP.")
 		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 
 		// Single update query instead of separate ones
 		_, err := userCollection.UpdateOne(
@@ -997,6 +1025,8 @@ func processReferral(c telebot.Context, code string) error {
 	}
 
 	// Find the user who owns this code
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	var referrer models.User
 	err = userCollection.FindOne(ctx, bson.M{"code": code}).Decode(&referrer)
 	if err != nil {
@@ -1012,6 +1042,8 @@ func processReferral(c telebot.Context, code string) error {
 	}
 
 	// Save the referral code to current user
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	update := bson.M{"$set": bson.M{"referral_code": code}}
 	_, err = userCollection.UpdateOne(ctx, bson.M{"telegram_user_id": c.Sender().ID}, update)
 	if err != nil {
@@ -1165,7 +1197,8 @@ func main() {
 		userCollection := database.GetUserCollection()
 		var existingUser models.User
 		filter := bson.M{"telegram_user_id": user.ID}
-
+		ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 		err := userCollection.FindOne(ctx, filter).Decode(&existingUser)
 		if err != nil {
 			newUser := models.User{
@@ -1178,6 +1211,8 @@ func main() {
 				CreatedAt:        now,
 				Code:             generateUniqueCode(),
 			}
+			ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
 			_, err := userCollection.InsertOne(ctx, newUser)
 			if err != nil {
 				log.Println("❌ Failed to insert user:", err)
@@ -1629,6 +1664,8 @@ func main() {
 
 			filter := bson.M{"slug": slug}
 			update := bson.M{"$set": bson.M{"file_id": fileID}}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
 			res, err := videoCollection.UpdateOne(ctx, filter, update)
 			if err != nil {
 				log.Println("❌ Gagal menyimpan file ID:", err)
@@ -1784,6 +1821,9 @@ func main() {
 				TotalPart:  totalPart,
 			}
 
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
 			_, err := videoCol.InsertOne(ctx, video)
 			if err != nil {
 				log.Println("❌ Gagal insert video:", err)
@@ -1845,6 +1885,8 @@ func main() {
 		} else {
 			user.IsVIP = true
 		}
+		ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 		_, err = userCollection.UpdateOne(
 			ctx,
 			bson.M{"telegram_username": targetUserName},
@@ -1883,6 +1925,8 @@ func main() {
 
 		filter := bson.M{"slug": slug}
 		update := bson.M{"$set": bson.M{"file_id": fileID}}
+		ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 		res, err := videoCollection.UpdateOne(ctx, filter, update)
 		if err != nil {
 			log.Println("❌ Gagal menyimpan file ID:", err)
