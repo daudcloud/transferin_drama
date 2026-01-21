@@ -35,6 +35,7 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
 
+	"transferin-drama/database" // Import your database package
 	"transferin-drama/models"
 )
 
@@ -1080,12 +1081,10 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
-	if err != nil {
+	if err := database.Connect(mongoURI, dbName); err != nil {
 		log.Fatal("❌ MongoDB connection failed:", err)
 	}
-	db = client.Database(dbName)
-	log.Println("✅ Connected to MongoDB")
+	defer database.Disconnect()
 
 	// redisClient = redis.NewClient(&redis.Options{
 	// 	Addr:     os.Getenv("REDIS_ADDR"), // example: "localhost:6379"
@@ -1106,7 +1105,7 @@ func main() {
 		Poller: &telebot.LongPoller{Timeout: 10 * time.Second},
 		URL:    "http://localhost:8081",
 	}
-	bot, err = telebot.NewBot(pref)
+	bot, err := telebot.NewBot(pref)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1227,7 +1226,7 @@ func main() {
 	bot.Handle("/process", func(c telebot.Context) error {
 		ownerID := os.Getenv("BOT_OWNER_ID")
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
 		if fmt.Sprint(c.Sender().ID) != ownerID {
@@ -1911,7 +1910,10 @@ func main() {
 
 	// Shutdown HTTP server
 
-	if err := httpServer.Shutdown(ctx); err != nil {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("⚠️ HTTP server shutdown error: %v", err)
 	}
 
@@ -1919,7 +1921,7 @@ func main() {
 	bot.Stop()
 
 	// Close MongoDB
-	if err := client.Disconnect(ctx); err != nil {
+	if err := database.Disconnect(); err != nil {
 		log.Printf("⚠️ MongoDB disconnect error: %v", err)
 	}
 
