@@ -1,4 +1,3 @@
-// database/mongo.go
 package database
 
 import (
@@ -13,18 +12,18 @@ import (
 var client *mongo.Client
 var databaseName string
 
-// Connect establishes connection to MongoDB with proper configuration
 func Connect(uri, db string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	clientOptions := options.Client().
 		ApplyURI(uri).
-		SetMaxPoolSize(500).                        // Increase pool size
-		SetMinPoolSize(50).                         // Keep warm connections
-		SetMaxConnIdleTime(30 * time.Second).       // Close idle connections after 30s
-		SetServerSelectionTimeout(5 * time.Second). // Fail fast if server unavailable
-		SetSocketTimeout(15 * time.Second)          // Individual query timeout
+		SetMaxPoolSize(500).
+		SetMinPoolSize(50).
+		SetMaxConnIdleTime(30 * time.Second).
+		SetServerSelectionTimeout(5 * time.Second).
+		SetConnectTimeout(10 * time.Second).
+		SetSocketTimeout(15 * time.Second)
 
 	var err error
 	client, err = mongo.Connect(ctx, clientOptions)
@@ -32,7 +31,6 @@ func Connect(uri, db string) error {
 		return err
 	}
 
-	// Verify connection with ping
 	if err = client.Ping(ctx, nil); err != nil {
 		return err
 	}
@@ -42,7 +40,6 @@ func Connect(uri, db string) error {
 	return nil
 }
 
-// Disconnect closes the MongoDB connection gracefully
 func Disconnect() error {
 	if client == nil {
 		return nil
@@ -54,48 +51,56 @@ func Disconnect() error {
 	return client.Disconnect(ctx)
 }
 
-// GetDatabase returns the database instance
 func GetDatabase() *mongo.Database {
 	if client == nil {
-		log.Fatal("❌ MongoDB client not initialized. Call Connect() first.")
+		log.Fatal("❌ CRITICAL: MongoDB client is nil. Database not connected!")
+	}
+	if databaseName == "" {
+		log.Fatal("❌ CRITICAL: Database name not set!")
 	}
 	return client.Database(databaseName)
 }
 
-// GetUserCollection returns the users collection
 func GetUserCollection() *mongo.Collection {
-	return GetDatabase().Collection("users")
-}
-
-// GetVideoCollection returns the videos collection
-func GetVideoCollection() *mongo.Collection {
-	return GetDatabase().Collection("videos")
-}
-
-// GetDramaCollection returns the drama collection
-func GetDramaCollection() *mongo.Collection {
-	return GetDatabase().Collection("drama")
-}
-
-// GetTransactionPendingCollection returns the transactionPending collection
-func GetTransactionPendingCollection() *mongo.Collection {
-	return GetDatabase().Collection("transactionPending")
-}
-
-// GetTransactionSuccessCollection returns the transactionSuccess collection
-func GetTransactionSuccessCollection() *mongo.Collection {
-	return GetDatabase().Collection("transactionSuccess")
-}
-
-// GetClient returns the MongoDB client (use sparingly)
-func GetClient() *mongo.Client {
-	if client == nil {
-		log.Fatal("❌ MongoDB client not initialized. Call Connect() first.")
+	db := GetDatabase()
+	if db == nil {
+		log.Fatal("❌ CRITICAL: Database is nil in GetUserCollection")
 	}
-	return client
+	return db.Collection("users")
 }
 
-// HealthCheck verifies MongoDB connection is alive
+func GetVideoCollection() *mongo.Collection {
+	db := GetDatabase()
+	if db == nil {
+		log.Fatal("❌ CRITICAL: Database is nil in GetVideoCollection")
+	}
+	return db.Collection("videos")
+}
+
+func GetDramaCollection() *mongo.Collection {
+	db := GetDatabase()
+	if db == nil {
+		log.Fatal("❌ CRITICAL: Database is nil in GetDramaCollection")
+	}
+	return db.Collection("drama")
+}
+
+func GetTransactionPendingCollection() *mongo.Collection {
+	db := GetDatabase()
+	if db == nil {
+		log.Fatal("❌ CRITICAL: Database is nil in GetTransactionPendingCollection")
+	}
+	return db.Collection("transactionPending")
+}
+
+func GetTransactionSuccessCollection() *mongo.Collection {
+	db := GetDatabase()
+	if db == nil {
+		log.Fatal("❌ CRITICAL: Database is nil in GetTransactionSuccessCollection")
+	}
+	return db.Collection("transactionSuccess")
+}
+
 func HealthCheck(ctx context.Context) error {
 	if client == nil {
 		return mongo.ErrClientDisconnected
