@@ -1142,7 +1142,7 @@ func main() {
 			Timeout: 15 * time.Minute,
 		},
 		Poller: &telebot.LongPoller{Timeout: 10 * time.Second},
-		// URL:    "http://localhost:8081",
+		URL:    "http://localhost:8081",
 	}
 	bot, err := telebot.NewBot(pref)
 	if err != nil {
