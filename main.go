@@ -1384,6 +1384,9 @@ func main() {
 				return c.Send("❌ Gagal cek data drama.")
 			}
 
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+
 			if err == mongo.ErrNoDocuments {
 				// Data BELUM ada → insert
 				drama := models.Drama{
@@ -1455,6 +1458,9 @@ func main() {
 
 					filter := bson.M{"slug": slug}
 					update := bson.M{"$set": bson.M{"file_id": fileID}}
+
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+					defer cancel()
 
 					_, err = videoCol.UpdateOne(ctx, filter, update)
 					if err != nil {
