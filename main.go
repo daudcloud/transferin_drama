@@ -982,6 +982,7 @@ func sendVideo(c telebot.Context, slug string) error {
 	}
 
 	if err != nil {
+		log.Print(err)
 		return c.Send("Gagal mengirim video")
 	}
 
@@ -1580,10 +1581,6 @@ func main() {
 		defer resp.Body.Close()
 
 		// Read the response body
-		if err != nil {
-			fmt.Println("Read Error:", err)
-			return nil
-		}
 
 		var apiData ApiResponse
 		err = json.NewDecoder(resp.Body).Decode(&apiData)
