@@ -23,6 +23,7 @@ import (
 
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/joho/godotenv"
+	"github.com/skip2/go-qrcode"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -82,7 +83,10 @@ type Package struct {
 }
 
 type APIResponse struct {
-	QRCodeUrl string `json:"qr_code_url"`
+	Payment struct {
+		PaymentNumber string `json:"payment_number"`
+		ExpiredAt     string `json:"expired_at"`
+	} `json:"payment"`
 }
 
 type CancelResponse struct {
@@ -433,10 +437,10 @@ func sendQris(c telebot.Context, vipCode string) error {
 	transactionID := generateTransactionID()
 	cancelBtn = menu.Data("❌ Batalkan pembayaran", "cancel_payment", fmt.Sprintf("%s|%d", transactionID, amount))
 	payload := map[string]interface{}{
-		"action":       "deposit",
-		"amount":       amount,
-		"reference_id": transactionID,
-		"description":  "Payment for Invoice #001",
+		"project":  "drama-trans",
+		"order_id": transactionID,
+		"amount":   amount,
+		"api_key":  os.Getenv("PAKASIR_API_KEY"),
 	}
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
@@ -447,8 +451,6 @@ func sendQris(c telebot.Context, vipCode string) error {
 		log.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-KEY", os.Getenv("CASSYPAY_API_KEY"))
-	req.Header.Set("X-SECRET-KEY", os.Getenv("CASSYPAY_SECRET_KEY"))
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 	}
@@ -464,12 +466,24 @@ func sendQris(c telebot.Context, vipCode string) error {
 		log.Fatalf("Decoding failed: %v", err)
 	}
 
-	fmt.Println(results.QRCodeUrl)
+	fmt.Println(results)
 
-	// Create HTTP client with timeout
-	client = &http.Client{
-		Timeout: 30 * time.Second,
+	content := results.Payment.PaymentNumber
+	filename := fmt.Sprintf("qr-%d.png", user.ID)
+	err = qrcode.WriteFile(content, qrcode.Medium, 256, filename)
+
+	if err != nil {
+		fmt.Printf("Error generating QR code: %v\n", err)
+		return nil
 	}
+
+	defer func() {
+		if err := os.Remove(filename); err != nil {
+			log.Printf("⚠️ Failed to cleanup QR file: %v", err)
+		}
+	}()
+
+	fmt.Println("QR Code saved to:", filename)
 
 	duration, ok := packageDuration[vipCode]
 	if !ok {
@@ -519,16 +533,33 @@ func sendQris(c telebot.Context, vipCode string) error {
 	// Kirim pesan ke user
 
 	var msg strings.Builder
+	fmt.Println(results)
+	if results.Payment.ExpiredAt == "" {
+		fmt.Println("Error: expired_at is still empty. Check JSON key names.")
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339Nano, results.Payment.ExpiredAt)
+	if err != nil {
+		fmt.Println("Error parsing time:", err) // This will tell you why it failed
+		return nil
+	}
+	loc, _ := time.LoadLocation("Asia/Jakarta")
+	fmt.Println("Original (UTC):", t.String())
+
+	// 3. Convert and format
+	wibTime := t.In(loc)
+	displayTime := wibTime.Format("02-01-2006 15:04:05")
 
 	msg.WriteString("💎 <b>Pembayaran Paket VIP (QRIS)</b>\n\n")
 	msg.WriteString(fmt.Sprintf("💲 Nominal : %s\n", formatted))
 	msg.WriteString(fmt.Sprintf("🔐 Paket VIP : %d hari\n", duration))
 	msg.WriteString(fmt.Sprintf("🧾 ID Transaksi : %s\n\n", transactionID))
+	msg.WriteString(fmt.Sprintf("✅ Berlaku sampai : %s ✅", displayTime))
 
 	// post := "TEST"
 
 	photo := &telebot.Photo{
-		File:    telebot.File{FileURL: results.QRCodeUrl},
+		File:    telebot.FromDisk(filename),
 		Caption: msg.String(),
 	}
 
@@ -540,7 +571,6 @@ func sendQris(c telebot.Context, vipCode string) error {
 	sentMsg, err = c.Bot().Send(c.Chat(), photo, reply, telebot.ModeHTML)
 
 	if err != nil {
-		log.Print(err)
 		return c.Send("Terjadi kesalahan!")
 	}
 
@@ -571,7 +601,7 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter) {
 	amount, _ := payload["amount"].(float64)
-	order_id, _ := payload["reference_id"].(string)
+	order_id, _ := payload["order_id"].(string)
 	log.Printf("🔔 Received Order ID: %s", order_id)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
