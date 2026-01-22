@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -83,10 +82,7 @@ type Package struct {
 }
 
 type APIResponse struct {
-	Payment struct {
-		PaymentNumber string `json:"payment_number"`
-		ExpiredAt     string `json:"expired_at"`
-	} `json:"payment"`
+	QRCodeUrl string `json:"qr_code_url"`
 }
 
 type CancelResponse struct {
@@ -468,46 +464,12 @@ func sendQris(c telebot.Context, vipCode string) error {
 		log.Fatalf("Decoding failed: %v", err)
 	}
 
-	fmt.Println(results)
-
-	filename := fmt.Sprintf("qr-%d.png", user.ID)
+	fmt.Println(results.QRCodeUrl)
 
 	// Create HTTP client with timeout
 	client = &http.Client{
 		Timeout: 30 * time.Second,
 	}
-
-	// Make GET request
-	resp, err = client.Get(url)
-	if err != nil {
-		return fmt.Errorf("failed to download image: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bad status: %s", resp.Status)
-	}
-
-	// Create the file
-	out, err := os.Create(filename)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %v", err)
-	}
-	defer out.Close()
-
-	// Copy response body to file
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to save image: %v", err)
-	}
-
-	// defer func() {
-	// 	if err := os.Remove(filename); err != nil {
-	// 		log.Printf("⚠️ Failed to cleanup QR file: %v", err)
-	// 	}
-	// }()
-
-	fmt.Println("QR Code saved to:", filename)
 
 	duration, ok := packageDuration[vipCode]
 	if !ok {
@@ -566,7 +528,7 @@ func sendQris(c telebot.Context, vipCode string) error {
 	// post := "TEST"
 
 	photo := &telebot.Photo{
-		File:    telebot.FromDisk(filename),
+		File:    telebot.File{FileURL: results.QRCodeUrl},
 		Caption: msg.String(),
 	}
 
