@@ -494,14 +494,17 @@ func sendQris(c telebot.Context, vipCode string) error {
 
 	// Masukkan ke collection transactionPending
 	pendingCol := database.GetTransactionPendingCollection()
-	filter := bson.M{"telegramID": telegramID, "transactionID": transactionID}
+	now := GetJakartaTime()
+	filter := bson.M{"telegramID": telegramID}
 	update := bson.M{
 		"$set": bson.M{
-			"duration": duration,
+			"transactionID": transactionID, // Update transaction ID
+			"duration":      duration,
+			"updated_at":    now,
 		},
 		"$setOnInsert": bson.M{
-			"telegramID":    telegramID,
-			"transactionID": transactionID,
+			"telegramID": telegramID,
+			"created_at": now,
 		},
 	}
 	opts := options.Update().SetUpsert(true)
@@ -509,11 +512,17 @@ func sendQris(c telebot.Context, vipCode string) error {
 	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_, err = pendingCol.UpdateOne(ctx, filter, update, opts)
+	updated, err := pendingCol.UpdateOne(ctx, filter, update, opts)
 
 	if err != nil {
-		log.Printf("❌ Gagal menyimpan transaksi pending: %v", err)
-		return c.Send("⚠️ Terjadi kesalahan saat menyiapkan transaksi.")
+		return err
+	}
+
+	// Optional: Log what happened
+	if updated.UpsertedCount > 0 {
+		log.Printf("✅ Created new pending transaction for user %d: %s", telegramID, transactionID)
+	} else {
+		log.Printf("🔄 Updated pending transaction for user %d: %s", telegramID, transactionID)
 	}
 
 	p := message.NewPrinter(language.Indonesian)
@@ -751,7 +760,10 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 				bonusForReferrer,
 				referrer.ExpireTime.Format("02 January 2006 - 15:04"),
 			)
-			_, _ = bot.Send(recipient, msg, telebot.ModeHTML)
+			_, err = bot.Send(recipient, msg, telebot.ModeHTML)
+			if err != nil {
+				log.Printf("⚠️ Failed to send message to user: %v", err)
+			}
 		}
 	}
 
@@ -762,6 +774,7 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 		TelegramID:    pendingTx.TelegramID,
 		ActivatedAt:   now,
 		Duration:      duration,
+		ReferralCode:  payer.ReferralCode,
 	}
 	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
