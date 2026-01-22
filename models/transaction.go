@@ -9,6 +9,8 @@ type TransactionPending struct {
 	TelegramID    int64     `bson:"telegramID"`
 	Duration      int       `bson:"duration"` // dalam bulan
 	UpdatedAt     time.Time `bson:"updated_at,omitempty"`
+	CreatedAt     time.Time `bson:"created_at,omitempty"`
+	ReferralCode  string    `bson:"referral_code"`
 }
 
 // TransactionSuccess represents a completed/activated VIP
@@ -17,4 +19,5 @@ type TransactionSuccess struct {
 	TelegramID    int64     `bson:"telegramID"`
 	ActivatedAt   time.Time `bson:"activatedAt"`
 	Duration      int       `bson:"duration"`
+	ReferralCode  string    `bson:"referral_code"`
 }
