@@ -501,11 +501,11 @@ func sendQris(c telebot.Context, vipCode string) error {
 		return fmt.Errorf("failed to save image: %v", err)
 	}
 
-	defer func() {
-		if err := os.Remove(filename); err != nil {
-			log.Printf("⚠️ Failed to cleanup QR file: %v", err)
-		}
-	}()
+	// defer func() {
+	// 	if err := os.Remove(filename); err != nil {
+	// 		log.Printf("⚠️ Failed to cleanup QR file: %v", err)
+	// 	}
+	// }()
 
 	fmt.Println("QR Code saved to:", filename)
 
