@@ -557,28 +557,11 @@ func sendQris(c telebot.Context, vipCode string) error {
 	// Kirim pesan ke user
 
 	var msg strings.Builder
-	fmt.Println(results)
-	if results.Payment.ExpiredAt == "" {
-		fmt.Println("Error: expired_at is still empty. Check JSON key names.")
-		return nil
-	}
-	t, err := time.Parse(time.RFC3339Nano, results.Payment.ExpiredAt)
-	if err != nil {
-		fmt.Println("Error parsing time:", err) // This will tell you why it failed
-		return nil
-	}
-	loc, _ := time.LoadLocation("Asia/Jakarta")
-	fmt.Println("Original (UTC):", t.String())
-
-	// 3. Convert and format
-	wibTime := t.In(loc)
-	displayTime := wibTime.Format("02-01-2006 15:04:05")
 
 	msg.WriteString("💎 <b>Pembayaran Paket VIP (QRIS)</b>\n\n")
 	msg.WriteString(fmt.Sprintf("💲 Nominal : %s\n", formatted))
 	msg.WriteString(fmt.Sprintf("🔐 Paket VIP : %d hari\n", duration))
 	msg.WriteString(fmt.Sprintf("🧾 ID Transaksi : %s\n\n", transactionID))
-	msg.WriteString(fmt.Sprintf("✅ Berlaku sampai : %s ✅", displayTime))
 
 	// post := "TEST"
 
