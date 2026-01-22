@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -23,7 +24,6 @@ import (
 
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/joho/godotenv"
-	"github.com/skip2/go-qrcode"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -433,14 +433,14 @@ func sendQris(c telebot.Context, vipCode string) error {
 	if !ok {
 		return c.Send("❌ Paket VIP tidak ditemukan.")
 	}
-	url := "https://app.pakasir.com/api/transactioncreate/qris"
+	url := os.Getenv("PG_URL")
 	transactionID := generateTransactionID()
 	cancelBtn = menu.Data("❌ Batalkan pembayaran", "cancel_payment", fmt.Sprintf("%s|%d", transactionID, amount))
 	payload := map[string]interface{}{
-		"project":  "drama-trans",
-		"order_id": transactionID,
-		"amount":   amount,
-		"api_key":  os.Getenv("PAKASIR_API_KEY"),
+		"action":       "deposit",
+		"amount":       amount,
+		"reference_id": transactionID,
+		"description":  "Payment for Invoice #001",
 	}
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
@@ -451,6 +451,8 @@ func sendQris(c telebot.Context, vipCode string) error {
 		log.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-KEY", os.Getenv("CASSYPAY_API_KEY"))
+	req.Header.Set("X-SECRET-KEY", os.Getenv("CASSYPAY_SECRET_KEY"))
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 	}
@@ -468,13 +470,35 @@ func sendQris(c telebot.Context, vipCode string) error {
 
 	fmt.Println(results)
 
-	content := results.Payment.PaymentNumber
 	filename := fmt.Sprintf("qr-%d.png", user.ID)
-	err = qrcode.WriteFile(content, qrcode.Medium, 256, filename)
 
+	// Create HTTP client with timeout
+	client = &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	// Make GET request
+	resp, err = client.Get(url)
 	if err != nil {
-		fmt.Printf("Error generating QR code: %v\n", err)
-		return nil
+		return fmt.Errorf("failed to download image: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bad status: %s", resp.Status)
+	}
+
+	// Create the file
+	out, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %v", err)
+	}
+	defer out.Close()
+
+	// Copy response body to file
+	_, err = io.Copy(out, resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to save image: %v", err)
 	}
 
 	defer func() {
@@ -601,7 +625,7 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter) {
 	amount, _ := payload["amount"].(float64)
-	order_id, _ := payload["order_id"].(string)
+	order_id, _ := payload["reference_id"].(string)
 	log.Printf("🔔 Received Order ID: %s", order_id)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
