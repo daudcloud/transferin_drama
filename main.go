@@ -578,6 +578,7 @@ func sendQris(c telebot.Context, vipCode string) error {
 	sentMsg, err = c.Bot().Send(c.Chat(), photo, reply, telebot.ModeHTML)
 
 	if err != nil {
+		log.Print(err)
 		return c.Send("Terjadi kesalahan!")
 	}
 
