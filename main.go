@@ -754,8 +754,17 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 		} else {
 			// Notify referrer
 			recipient := &telebot.User{ID: referrer.TelegramUserID}
-			log.Println("Referrer telegram:")
-			log.Println(referrer.TelegramUserID)
+			log.Printf("📤 Sending bonus notification to referrer: %d", referrer.TelegramUserID)
+
+			// Check if ExpireTime is nil before formatting
+			var expireTimeStr string
+			if referrer.ExpireTime != nil {
+				expireTimeStr = referrer.ExpireTime.Format("02 January 2006 - 15:04")
+			} else {
+				expireTimeStr = "tidak tersedia"
+				log.Printf("⚠️ Referrer ExpireTime is nil!")
+			}
+
 			msg := fmt.Sprintf(
 				"🎉 Bonus VIP!\n\n"+
 					"👤 Teman kamu <b>%s</b> baru berlangganan VIP.\n"+
@@ -763,11 +772,12 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 					"⏰ VIP berlaku sampai: %s WIB.",
 				payer.TelegramName,
 				bonusForReferrer,
-				referrer.ExpireTime.Format("02 January 2006 - 15:04"),
+				expireTimeStr,
 			)
+
 			_, err = bot.Send(recipient, msg, telebot.ModeHTML)
 			if err != nil {
-				log.Printf("⚠️ Failed to send message to user: %v", err)
+				log.Printf("⚠️ Failed to send message to user %d: %v", referrer.TelegramUserID, err)
 			}
 			log.Print("Berhasil menambahkan durasi referrer")
 		}
@@ -788,6 +798,8 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 	if err != nil {
 		log.Printf("❌ Failed to save to transactionSuccess: %v", err)
 	}
+
+	log.Println("Success added success transaction")
 
 	// Hapus dari pending
 	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
