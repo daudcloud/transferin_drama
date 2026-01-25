@@ -619,9 +619,6 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 		return
 	}
 
-	log.Println("Pending Transaction: ")
-	log.Print(pendingTx)
-
 	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -632,9 +629,6 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-
-	log.Println("Payer: ")
-	log.Print(payer)
 
 	_, duration := getPackages(int(amount))
 	if duration <= 0 {
@@ -659,6 +653,9 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 	}
 
 	finalDuration := duration + bonusForPayer
+
+	log.Println("Duration: ")
+	log.Println(finalDuration)
 
 	// Indonesian timezone
 	now := GetJakartaTime()
@@ -757,6 +754,8 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 		} else {
 			// Notify referrer
 			recipient := &telebot.User{ID: referrer.TelegramUserID}
+			log.Println("Referrer telegram:")
+			log.Println(referrer.TelegramUserID)
 			msg := fmt.Sprintf(
 				"🎉 Bonus VIP!\n\n"+
 					"👤 Teman kamu <b>%s</b> baru berlangganan VIP.\n"+
@@ -770,6 +769,7 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 			if err != nil {
 				log.Printf("⚠️ Failed to send message to user: %v", err)
 			}
+			log.Print("Berhasil menambahkan durasi referrer")
 		}
 	}
 
@@ -799,6 +799,8 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 
 	// Kirim pesan konfirmasi
 	recipient := &telebot.User{ID: pendingTx.TelegramID}
+	log.Println("Payer telegram:")
+	log.Println(pendingTx.TelegramID)
 	msg := fmt.Sprintf(
 		"✨ Hore! VIP kamu sudah aktif! ✨\n\n"+
 			"🎁 <b>Paket:</b> Akses VIP %d Hari\n"+
