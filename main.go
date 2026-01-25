@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -49,6 +50,10 @@ var (
 var (
 	lastVideoMessagesMu sync.RWMutex
 	lastVideoMessages   = make(map[int64]*telebot.Message)
+	paymentLocksMu      sync.Mutex
+	paymentLocks        = make(map[string]*sync.Mutex)
+	idCounter           uint64
+	idMutex             sync.Mutex
 )
 
 var mc = memcache.New("127.0.0.1:11211")
@@ -97,6 +102,16 @@ const (
 	spreadsheetID = "1IRnsdu7xEWL3kPApxHBwlew8uf2YmjPc1lcZk6U58ng"
 	sheetName     = "sheet1"
 )
+
+func getPaymentLock(orderID string) *sync.Mutex {
+	paymentLocksMu.Lock()
+	defer paymentLocksMu.Unlock()
+
+	if _, exists := paymentLocks[orderID]; !exists {
+		paymentLocks[orderID] = &sync.Mutex{}
+	}
+	return paymentLocks[orderID]
+}
 
 func getCachedVideo(slug string) (*models.Video, error) {
 	key := "fileid:" + slug
@@ -391,26 +406,21 @@ func handleStatus(c telebot.Context) error {
 }
 
 func generateTransactionID() string {
-	// Seed the random number generator (important for different IDs each time)
-	rand.Seed(time.Now().UnixNano())
+	idMutex.Lock()
+	idCounter++
+	counter := idCounter
+	idMutex.Unlock()
 
-	// Get current time components
 	now := time.Now()
-	year := now.Format("2006") // YYYY
-	month := now.Format("01")  // MM (with leading zero)
-	day := now.Format("02")    // DD (with leading zero)
-	hour := now.Format("15")   // HH (24-hour)
-	minute := now.Format("04") // MM
-	second := now.Format("05") // SS
+	timestamp := now.Format("20060102150405")
 
-	// Generate 3 random digits (000-999)
-	// rand.Intn(1000) gives 0 to 999, then format to ensure 3 digits (e.g., "007")
-	randomDigits := fmt.Sprintf("%03d", rand.Intn(1000))
+	// Generate cryptographically secure random bytes
+	randomBytes := make([]byte, 4)
+	rand.Read(randomBytes)
+	randomHex := hex.EncodeToString(randomBytes)
 
-	// Combine all parts
-	txID := fmt.Sprintf("INV%s%s%s%s%s%s%s", year, month, day, hour, minute, second, randomDigits)
-
-	return txID
+	// Format: INV-YYYYMMDDHHMMSS-COUNTER-RANDOM
+	return fmt.Sprintf("INV-%s-%04d-%s", timestamp, counter%10000, randomHex)
 }
 
 func sendQris(c telebot.Context, vipCode string) error {
@@ -466,8 +476,6 @@ func sendQris(c telebot.Context, vipCode string) error {
 		log.Fatalf("Decoding failed: %v", err)
 	}
 
-	fmt.Println(results)
-
 	content := results.Payment.PaymentNumber
 	filename := fmt.Sprintf("qr-%d.png", user.ID)
 	err = qrcode.WriteFile(content, qrcode.Medium, 256, filename)
@@ -482,8 +490,6 @@ func sendQris(c telebot.Context, vipCode string) error {
 			log.Printf("⚠️ Failed to cleanup QR file: %v", err)
 		}
 	}()
-
-	fmt.Println("QR Code saved to:", filename)
 
 	duration, ok := packageDuration[vipCode]
 	if !ok {
@@ -582,7 +588,6 @@ func sendQris(c telebot.Context, vipCode string) error {
 
 // Webhook handler di file utama bot
 func handleWebhook(w http.ResponseWriter, r *http.Request, bot *telebot.Bot) {
-	log.Print("Hitted")
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
@@ -604,122 +609,84 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 	order_id, _ := payload["order_id"].(string)
 	log.Printf("🔔 Received Order ID: %s", order_id)
 
-	if bot == nil {
-		log.Printf("❌ CRITICAL: bot instance is nil!")
-		return
-	}
+	lock := getPaymentLock(order_id)
+	lock.Lock()
+	defer lock.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	pendingCol := database.GetTransactionPendingCollection()
-	successCol := database.GetTransactionSuccessCollection()
-	userCol := database.GetUserCollection()
-
-	var pendingTx models.TransactionPending
-	err := pendingCol.FindOne(ctx, bson.M{"transactionID": order_id}).Decode(&pendingTx)
+	session, err := database.GetClient().StartSession()
 	if err != nil {
-		log.Printf("❌ Order ID not found in pending transactions: %s", order_id)
-		w.WriteHeader(http.StatusOK)
+		log.Printf("❌ Failed to start session: %v", err)
 		return
 	}
+	defer session.EndSession(ctx)
 
-	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	err = mongo.WithSession(ctx, session, func(sc mongo.SessionContext) error {
+		// Start transaction
+		if err := session.StartTransaction(); err != nil {
+			return err
+		}
 
-	var payer models.User
-	err = userCol.FindOne(ctx, bson.M{"telegram_user_id": pendingTx.TelegramID}).Decode(&payer)
-	if err != nil {
-		log.Printf("❌ Failed to fetch payer user: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
+		pendingCol := database.GetTransactionPendingCollection()
+		successCol := database.GetTransactionSuccessCollection()
+		userCol := database.GetUserCollection()
 
-	_, duration := getPackages(int(amount))
-	if duration <= 0 {
-		duration = 0 // default fallback
-	}
+		var existing models.TransactionSuccess
+		err := successCol.FindOne(sc, bson.M{"transactionID": order_id}).Decode(&existing)
+		if err == nil {
+			log.Printf("⚠️ Already processed: %s", order_id)
+			session.AbortTransaction(sc)
+			return nil
+		}
 
-	bonusForPayer := 0
-	bonusForReferrer := 0
-	if payer.ReferralCode != "" {
-		// payer gets 100% bonus, max 7
-		if duration > 0 {
-			bonusForPayer = duration
-			if bonusForPayer > 7 {
-				bonusForPayer = 7
+		// Get pending transaction
+		var pendingTx models.TransactionPending
+		err = pendingCol.FindOne(sc, bson.M{"transactionID": order_id}).Decode(&pendingTx)
+		if err != nil {
+			session.AbortTransaction(sc)
+			return err
+		}
+
+		var payer models.User
+		err = userCol.FindOne(ctx, bson.M{"telegram_user_id": pendingTx.TelegramID}).Decode(&payer)
+		if err != nil {
+			session.AbortTransaction(sc)
+			return err
+		}
+
+		_, duration := getPackages(int(amount))
+		if duration <= 0 {
+			duration = 0 // default fallback
+		}
+
+		bonusForPayer := 0
+		bonusForReferrer := 0
+		if payer.ReferralCode != "" {
+			// payer gets 100% bonus, max 7
+			if duration > 0 {
+				bonusForPayer = duration
+				if bonusForPayer > 7 {
+					bonusForPayer = 7
+				}
+			}
+			// referrer gets same as payer's package, max 3
+			bonusForReferrer = duration
+			if bonusForReferrer > 3 {
+				bonusForReferrer = 3
 			}
 		}
-		// referrer gets same as payer's package, max 3
-		bonusForReferrer = duration
-		if bonusForReferrer > 3 {
-			bonusForReferrer = 3
-		}
-	}
 
-	finalDuration := duration + bonusForPayer
+		finalDuration := duration + bonusForPayer
 
-	log.Println("Duration: ")
-	log.Println(finalDuration)
+		// Indonesian timezone
+		now := GetJakartaTime()
+		var updatedUser models.User
+		// Update expire_time without querying first
 
-	// Indonesian timezone
-	now := GetJakartaTime()
-	var updatedUser models.User
-	// Update expire_time without querying first
-
-	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	err = userCol.FindOneAndUpdate(ctx,
-		bson.M{"telegram_user_id": pendingTx.TelegramID},
-		mongo.Pipeline{
-			{{
-				Key: "$set",
-				Value: bson.D{
-					{
-						Key: "expire_time",
-						Value: bson.D{
-							{
-								Key: "$cond",
-								Value: bson.A{
-									bson.D{
-										{Key: "$gt", Value: bson.A{"$expire_time", now}},
-									},
-									bson.D{
-										{Key: "$dateAdd", Value: bson.D{
-											{Key: "startDate", Value: "$expire_time"},
-											{Key: "unit", Value: "day"},
-											{Key: "amount", Value: finalDuration},
-										}},
-									},
-									now.AddDate(0, 0, finalDuration),
-								},
-							},
-						},
-					},
-					{
-						Key:   "is_vip",
-						Value: true,
-					},
-				},
-			}},
-		},
-		options.FindOneAndUpdate().SetReturnDocument(options.After),
-	).Decode(&updatedUser)
-	if err != nil {
-		log.Printf("❌ Failed to update user VIP: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	if payer.ReferralCode != "" && bonusForReferrer > 0 {
-		var referrer models.User
-
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		err := userCol.FindOneAndUpdate(ctx,
-			bson.M{"code": payer.ReferralCode},
+		err = userCol.FindOneAndUpdate(sc,
+			bson.M{"telegram_user_id": pendingTx.TelegramID},
 			mongo.Pipeline{
 				{{
 					Key: "$set",
@@ -730,110 +697,123 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 								{
 									Key: "$cond",
 									Value: bson.A{
-										bson.D{
-											{Key: "$gt", Value: bson.A{"$expire_time", now}},
-										},
-										bson.D{
-											{Key: "$dateAdd", Value: bson.D{
-												{Key: "startDate", Value: "$expire_time"},
-												{Key: "unit", Value: "day"},
-												{Key: "amount", Value: bonusForReferrer},
-											}},
-										},
-										now.AddDate(0, 0, bonusForReferrer),
+										bson.D{{Key: "$gt", Value: bson.A{"$expire_time", now}}},
+										bson.D{{Key: "$dateAdd", Value: bson.D{
+											{Key: "startDate", Value: "$expire_time"},
+											{Key: "unit", Value: "day"},
+											{Key: "amount", Value: finalDuration},
+										}}},
+										now.AddDate(0, 0, finalDuration),
 									},
 								},
 							},
 						},
-						{
-							Key:   "is_vip",
-							Value: true,
-						},
+						{Key: "is_vip", Value: true},
 					},
 				}},
 			},
 			options.FindOneAndUpdate().SetReturnDocument(options.After),
-		).Decode(&referrer)
+		).Decode(&updatedUser)
 		if err != nil {
-			log.Printf("⚠️ Failed to update referrer VIP: %v", err)
-		} else {
-			// Notify referrer
-			recipient := &telebot.User{ID: referrer.TelegramUserID}
-			log.Printf("📤 Sending bonus notification to referrer: %d", referrer.TelegramUserID)
-
-			// Check if ExpireTime is nil before formatting
-			var expireTimeStr string
-			if referrer.ExpireTime != nil {
-				expireTimeStr = referrer.ExpireTime.Format("02 January 2006 - 15:04")
-			} else {
-				expireTimeStr = "tidak tersedia"
-				log.Printf("⚠️ Referrer ExpireTime is nil!")
-			}
-
-			msg := fmt.Sprintf(
-				"🎉 Bonus VIP!\n\n"+
-					"👤 Teman kamu <b>%s</b> baru berlangganan VIP.\n"+
-					"🎁 Kamu dapat tambahan VIP %d Hari (maksimal).\n"+
-					"⏰ VIP berlaku sampai: %s WIB.",
-				payer.TelegramName,
-				bonusForReferrer,
-				expireTimeStr,
-			)
-
-			_, err = bot.Send(recipient, msg, telebot.ModeHTML)
-			if err != nil {
-				log.Printf("⚠️ Failed to send message to user %d: %v", referrer.TelegramUserID, err)
-			}
-			log.Print("Berhasil menambahkan durasi referrer")
+			log.Printf("❌ Failed to update user VIP: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return nil
 		}
-	}
 
-	// Simpan ke transactionSuccess
+		if payer.ReferralCode != "" && bonusForReferrer > 0 {
+			var referrer models.User
+			err := userCol.FindOneAndUpdate(sc,
+				bson.M{"code": payer.ReferralCode},
+				mongo.Pipeline{
+					{{
+						Key: "$set",
+						Value: bson.D{
+							{
+								Key: "expire_time",
+								Value: bson.D{
+									{
+										Key: "$cond",
+										Value: bson.A{
+											bson.D{{Key: "$gt", Value: bson.A{"$expire_time", now}}},
+											bson.D{{Key: "$dateAdd", Value: bson.D{
+												{Key: "startDate", Value: "$expire_time"},
+												{Key: "unit", Value: "day"},
+												{Key: "amount", Value: bonusForReferrer},
+											}}},
+											now.AddDate(0, 0, bonusForReferrer),
+										},
+									},
+								},
+							},
+							{Key: "is_vip", Value: true},
+						},
+					}},
+				},
+				options.FindOneAndUpdate().SetReturnDocument(options.After),
+			).Decode(&referrer)
+			if err != nil {
+				log.Printf("⚠️ Failed to update referrer VIP: %v", err)
+			} else {
+				go sendReferralNotification(bot, &referrer, &payer, bonusForReferrer)
+			}
+		}
 
-	successTx := models.TransactionSuccess{
-		TransactionID: pendingTx.TransactionID,
-		TelegramID:    pendingTx.TelegramID,
-		ActivatedAt:   now,
-		Duration:      duration,
-		ReferralCode:  payer.ReferralCode,
-	}
-	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_, err = successCol.InsertOne(ctx, successTx)
-	if err != nil {
-		log.Printf("❌ Failed to save to transactionSuccess: %v", err)
-	}
+		// Simpan ke transactionSuccess
 
-	log.Println("Success added success transaction")
+		successTx := models.TransactionSuccess{
+			TransactionID: pendingTx.TransactionID,
+			TelegramID:    pendingTx.TelegramID,
+			ActivatedAt:   now,
+			Duration:      duration,
+			ReferralCode:  payer.ReferralCode,
+		}
 
-	// Hapus dari pending
-	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_, err = pendingCol.DeleteOne(ctx, bson.M{"trasactionID": order_id})
-	if err != nil {
-		log.Printf("⚠️ Failed to delete from pending: %v", err)
-	}
+		_, err = successCol.InsertOne(ctx, successTx)
+		if err != nil {
+			log.Printf("❌ Failed to save to transactionSuccess: %v", err)
+		}
 
-	// Kirim pesan konfirmasi
-	recipient := &telebot.User{ID: successTx.TelegramID}
-	log.Println("Payer telegram:")
-	log.Println(successTx.TelegramID)
+		// Hapus dari pending
+
+		_, err = pendingCol.DeleteOne(ctx, bson.M{"trasactionID": order_id})
+		if err != nil {
+			session.AbortTransaction(sc)
+			return err
+		}
+
+		// ✅ Commit transaction
+		if err := session.CommitTransaction(sc); err != nil {
+			return err
+		}
+
+		// Send notification (outside transaction)
+		go sendPaymentNotification(bot, pendingTx.TelegramID, duration, &updatedUser)
+
+		log.Printf("✅ VIP activated for user ID %d with transaction ID %s (duration: %d hari)", pendingTx.TelegramID, order_id, duration)
+		return nil
+	})
+}
+
+func sendReferralNotification(bot *telebot.Bot, referrer *models.User, payer *models.User, bonus int) {
+	recipient := &telebot.User{ID: referrer.TelegramUserID}
 	msg := fmt.Sprintf(
-		"✨ Hore! VIP kamu sudah aktif! ✨\n\n"+
-			"🎁 <b>Paket:</b> Akses VIP %d Hari\n"+
-			"⏰ <b>Berlaku sampai:</b> %s WIB\n"+
-			"📺 Sekarang kamu bisa nonton semua drama tanpa batas!\n"+
-			"❤️ Terima kasih sudah dukung kami di DRAMATRANS!",
-		duration,
-		updatedUser.ExpireTime.Format("02 January 2006 - 15:04"),
+		"🎉 <b>Bonus VIP!</b>\n\n"+
+			"👤 Teman kamu <b>%s</b> baru berlangganan VIP.\n"+
+			"🎁 Kamu dapat tambahan VIP <b>%d Hari</b>!",
+		payer.TelegramName, bonus,
 	)
+	bot.Send(recipient, msg, telebot.ModeHTML)
+}
 
-	_, err = bot.Send(recipient, msg, telebot.ModeHTML)
-	if err != nil {
-		log.Printf("⚠️ Failed to send message to user: %v", err)
-	}
-
-	log.Printf("✅ VIP activated for user ID %d with transaction ID %s (duration: %d hari)", pendingTx.TelegramID, order_id, duration)
+func sendPaymentNotification(bot *telebot.Bot, userID int64, duration int, user *models.User) {
+	recipient := &telebot.User{ID: userID}
+	msg := fmt.Sprintf(
+		"✨ <b>Hore! VIP kamu sudah aktif!</b> ✨\n\n"+
+			"🎁 <b>Paket:</b> Akses VIP %d Hari\n"+
+			"📺 Sekarang kamu bisa nonton semua drama tanpa batas!",
+		duration,
+	)
+	bot.Send(recipient, msg, telebot.ModeHTML)
 }
 
 func sameDay(t1, t2 time.Time) bool {
