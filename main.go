@@ -619,6 +619,9 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 		return
 	}
 
+	log.Println("Pending Transaction: ")
+	log.Print(pendingTx)
+
 	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -629,6 +632,9 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+
+	log.Println("Payer: ")
+	log.Print(payer)
 
 	_, duration := getPackages(int(amount))
 	if duration <= 0 {
