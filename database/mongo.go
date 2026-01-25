@@ -40,6 +40,14 @@ func Connect(uri, db string) error {
 	return nil
 }
 
+// In database/mongo.go
+func GetClient() *mongo.Client {
+	if client == nil {
+		log.Fatal("❌ MongoDB client not initialized")
+	}
+	return client
+}
+
 func Disconnect() error {
 	if client == nil {
 		return nil
