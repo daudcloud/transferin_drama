@@ -604,6 +604,11 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 	order_id, _ := payload["order_id"].(string)
 	log.Printf("🔔 Received Order ID: %s", order_id)
 
+	if bot == nil {
+		log.Printf("❌ CRITICAL: bot instance is nil!")
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
