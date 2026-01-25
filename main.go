@@ -581,7 +581,7 @@ func sendQris(c telebot.Context, vipCode string) error {
 }
 
 // Webhook handler di file utama bot
-func handleWebhook(w http.ResponseWriter, r *http.Request) {
+func handleWebhook(w http.ResponseWriter, r *http.Request, bot *telebot.Bot) {
 	log.Print("Hitted")
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -596,10 +596,10 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 
-	go processPaymentWebhook(payload, w)
+	go processPaymentWebhook(payload, w, bot)
 }
 
-func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter) {
+func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter, bot *telebot.Bot) {
 	amount, _ := payload["amount"].(float64)
 	order_id, _ := payload["order_id"].(string)
 	log.Printf("🔔 Received Order ID: %s", order_id)
@@ -1976,7 +1976,9 @@ func main() {
 		{Text: "status", Description: "Cek status akun"},
 	})
 
-	http.HandleFunc("/webhook/pakasir", handleWebhook)
+	http.HandleFunc("/webhook/pakasir", func(w http.ResponseWriter, r *http.Request) {
+		handleWebhook(w, r, bot) // Pass bot to the handler
+	})
 
 	// Setup signal handling
 	sigChan := make(chan os.Signal, 1)
