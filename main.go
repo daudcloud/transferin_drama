@@ -798,9 +798,9 @@ func processPaymentWebhook(payload map[string]interface{}, w http.ResponseWriter
 	}
 
 	// Kirim pesan konfirmasi
-	recipient := &telebot.User{ID: pendingTx.TelegramID}
+	recipient := &telebot.User{ID: successTx.TelegramID}
 	log.Println("Payer telegram:")
-	log.Println(pendingTx.TelegramID)
+	log.Println(successTx.TelegramID)
 	msg := fmt.Sprintf(
 		"✨ Hore! VIP kamu sudah aktif! ✨\n\n"+
 			"🎁 <b>Paket:</b> Akses VIP %d Hari\n"+
