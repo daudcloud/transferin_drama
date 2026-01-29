@@ -39,6 +39,7 @@ import (
 	"gopkg.in/telebot.v3"
 
 	"transferin-drama/database" // Import your database package
+	"transferin-drama/middleware"
 	"transferin-drama/models"
 )
 
@@ -1169,6 +1170,8 @@ func main() {
 		log.Fatal(err)
 	}
 
+	bot.Use(middleware.AntiSpamCommands)
+
 	bot.Use(func(next telebot.HandlerFunc) telebot.HandlerFunc {
 		return func(c telebot.Context) error {
 			ownerIDStr := os.Getenv("BOT_OWNER_ID")
@@ -1193,14 +1196,29 @@ func main() {
 	// Buttons
 	menu.Inline(menu.Row(startBtn), menu.Row(vipBtn, statusBtn))
 
-	bot.Handle("/test", func(c telebot.Context) error {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	bot.Handle("/spamstats", func(c telebot.Context) error {
+		stats := middleware.GetUserStats(c.Sender().ID)
+		return c.Send(stats, telebot.ModeHTML)
+	})
 
-		if err := database.HealthCheck(ctx); err != nil {
-			return c.Send("❌ Database not connected: " + err.Error())
+	bot.Handle("/resetspam", func(c telebot.Context) error {
+		ownerID := os.Getenv("BOT_OWNER_ID")
+		if fmt.Sprint(c.Sender().ID) != ownerID {
+			return c.Send("❌ Only owner can use this command.")
 		}
-		return c.Send("✅ Database is healthy!")
+
+		args := c.Args()
+		if len(args) != 1 {
+			return c.Send("Usage: /resetspam <user_id>")
+		}
+
+		userID, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return c.Send("❌ Invalid user ID.")
+		}
+
+		middleware.ResetUserSpam(userID)
+		return c.Send(fmt.Sprintf("✅ Spam protection reset for user %d", userID))
 	})
 
 	// Handle /start
